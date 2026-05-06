@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/api",
+    "crates/common",
+    "crates/engine",
+    "crates/market_data",
+    "crates/persistence",
+    "crates/risk",
+]
+resolver = "2"
