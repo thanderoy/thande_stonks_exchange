@@ -8,4 +8,4 @@ CREATE TABLE trades (
     executed_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX treade_symmbol_time_idx ON trades(symbol, executed_at DESC);
+CREATE INDEX trades_symbol_time_idx ON trades(symbol, executed_at DESC);
