@@ -1,14 +1,33 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use tokio::sync::broadcast;
+use serde::{Deserialize, Serialize};
+use common::{OrderId, Symbol};
+use engine::matcher::Trade;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum MarketEvent {
+    Trade(Trade),
+    OrderAccepted { order_id: OrderId, symbol: Symbol },
+    OrderCancelled { order_id: OrderId, symbol: Symbol },
+    SessionState { symbol: Symbol, state: String },
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct EventBus {
+    tx: broadcast::Sender<MarketEvent>,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl EventBus {
+    pub fn new(capacity: usize) -> Self {
+        let (tx, _) = broadcast::channel(capacity);
+        Self { tx }
+    }
+
+    pub fn publish(&self, event: MarketEvent) {
+        // Ignore send errors — no active subscribers is not a failure.
+        let _ = self.tx.send(event);
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<MarketEvent> {
+        self.tx.subscribe()
     }
 }

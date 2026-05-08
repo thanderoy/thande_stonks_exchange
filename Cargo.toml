@@ -1,3 +1,8 @@
+[package]
+name = "thande_stonks_exchange"
+version = "0.1.0"
+edition = "2024"
+
 [workspace]
 members = [
     "crates/api",
@@ -8,3 +13,56 @@ members = [
     "crates/risk",
 ]
 resolver = "2"
+
+[[test]]
+name = "common"
+path = "tests/common/lib.rs"
+
+[[test]]
+name = "engine_order"
+path = "tests/engine/order.rs"
+
+[[test]]
+name = "engine_orderbook"
+path = "tests/engine/orderbook.rs"
+
+[[test]]
+name = "engine_matcher"
+path = "tests/engine/matcher.rs"
+
+[[test]]
+name = "engine_session"
+path = "tests/engine/session.rs"
+
+[[test]]
+name = "engine_shard"
+path = "tests/engine/shard.rs"
+
+[[test]]
+name = "risk"
+path = "tests/risk/lib.rs"
+
+[[test]]
+name = "risk_circuit_breaker"
+path = "tests/risk/circuit_breaker.rs"
+
+[[test]]
+name = "persistence_wal"
+path = "tests/persistence/wal.rs"
+
+[[test]]
+name = "market_data"
+path = "tests/market_data/lib.rs"
+
+[dev-dependencies]
+common = { path = "crates/common" }
+engine = { path = "crates/engine" }
+risk = { path = "crates/risk" }
+persistence = { path = "crates/persistence" }
+market_data = { path = "crates/market_data" }
+rust_decimal = "1.34"
+rust_decimal_macros = "1.34"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+chrono = "0.4"

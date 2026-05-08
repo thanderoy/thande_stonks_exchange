@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use rust_decimal::Decimal;
-use crate::order::{Order, Side};
+use crate::order::Order;
 use common::Symbol;
 
 pub struct PriceLevel {
@@ -10,13 +10,15 @@ pub struct PriceLevel {
 
 pub struct OrderBook {
     pub symbol: Symbol,
-    // BTreeMap keeps keys sorted, so we get price levels in order
-    // Highest bids first for buyers, lowest asks first for sellers
-    pub bids: BTreeMap<Decimal, PriceLevel>,    // Buy orders
-    pub asks: BTreeMap<Decimal, PriceLevel>,    // Sell orders
+    pub bids: BTreeMap<Decimal, PriceLevel>,
+    pub asks: BTreeMap<Decimal, PriceLevel>,
 }
 
 impl OrderBook {
+    pub fn new(symbol: Symbol) -> Self {
+        Self { symbol, bids: BTreeMap::new(), asks: BTreeMap::new() }
+    }
+
     pub fn best_bid(&self) -> Option<Decimal> {
         self.bids.keys().next_back().cloned()
     }
@@ -29,4 +31,3 @@ impl OrderBook {
         Some(self.best_ask()? - self.best_bid()?)
     }
 }
-

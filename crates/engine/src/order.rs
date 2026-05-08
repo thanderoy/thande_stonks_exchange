@@ -1,35 +1,31 @@
 use rust_decimal::Decimal;
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use common::{OrderId, Symbol};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum OrderType {
     Market,
-    Limit {
-        price: Decimal
-    },
-    StopLimit {
-        stop_price: Decimal,
-        limit_price: Decimal,
-    },
+    Limit { price: Decimal },
+    StopLimit { stop_price: Decimal, limit_price: Decimal },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeInForce {
-    GoodTillCanceled,    // GTC
-    ImmediateOrCancel,   // IOC
-    FillOrKill,          // FOK
-    Day,                 // Expire at end of trading session
+    GoodTillCanceled,
+    ImmediateOrCancel,
+    FillOrKill,
+    Day,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: OrderId,
     pub symbol: Symbol,
@@ -45,3 +41,52 @@ pub struct Order {
     pub client_id: String,
 }
 
+impl Order {
+    pub fn new_limit(
+        symbol: Symbol,
+        side: Side,
+        price: Decimal,
+        quantity: Decimal,
+        tif: TimeInForce,
+        client_id: impl Into<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: OrderId::new(),
+            symbol,
+            side,
+            order_type: OrderType::Limit { price },
+            quantity,
+            filled_quantity: Decimal::ZERO,
+            time_in_force: tif,
+            created_at: now,
+            updated_at: now,
+            submitted_at: now,
+            cancelled_at: None,
+            client_id: client_id.into(),
+        }
+    }
+
+    pub fn new_market(
+        symbol: Symbol,
+        side: Side,
+        quantity: Decimal,
+        client_id: impl Into<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: OrderId::new(),
+            symbol,
+            side,
+            order_type: OrderType::Market,
+            quantity,
+            filled_quantity: Decimal::ZERO,
+            time_in_force: TimeInForce::ImmediateOrCancel,
+            created_at: now,
+            updated_at: now,
+            submitted_at: now,
+            cancelled_at: None,
+            client_id: client_id.into(),
+        }
+    }
+}
