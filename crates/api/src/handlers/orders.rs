@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use common::{OrderId, Symbol};
@@ -10,22 +11,56 @@ use engine::matcher::Trade;
 use market_data::MarketEvent;
 use crate::state::AppState;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SubmitOrderRequest {
+    /// Ticker symbol, e.g. "AAPL"
     pub symbol: String,
     pub side: Side,
     pub order_type: OrderType,
+    /// Order quantity (decimal string)
     pub quantity: Decimal,
     pub time_in_force: TimeInForce,
+    /// Pre-registered client identifier
     pub client_id: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct SubmitOrderResponse {
+    /// Server-assigned order UUID
     pub order_id: OrderId,
+    /// Trades generated immediately by this order (may be empty)
     pub trades: Vec<Trade>,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CancelOrderResponse {
+    pub cancelled: OrderId,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct CancelQuery {
+    /// Ticker symbol of the order to cancel
+    pub symbol: String,
+    pub side: Side,
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/orders",
+    request_body = SubmitOrderRequest,
+    responses(
+        (status = 200, description = "Order accepted; any immediate fills are in `trades`", body = SubmitOrderResponse),
+        (status = 400, description = "Risk check failed or malformed request", body = ErrorResponse),
+        (status = 404, description = "Symbol not registered", body = ErrorResponse),
+        (status = 500, description = "Internal engine error", body = ErrorResponse),
+    ),
+    tag = "orders"
+)]
 pub async fn submit_order(
     body: web::Json<SubmitOrderRequest>,
     data: web::Data<Arc<AppState>>,
@@ -70,21 +105,22 @@ pub async fn submit_order(
     let order_id = order.id;
 
     if let Err(e) = data.risk.check(&order) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() }));
+        return HttpResponse::BadRequest().json(ErrorResponse { error: e.to_string() });
     }
 
     let shard = match data.shards.get(&body.symbol) {
         Some(s) => s.clone(),
         None => {
-            return HttpResponse::NotFound()
-                .json(serde_json::json!({ "error": format!("symbol {} not found", body.symbol) }))
+            return HttpResponse::NotFound().json(ErrorResponse {
+                error: format!("symbol {} not found", body.symbol),
+            })
         }
     };
 
     let (reply_tx, mut reply_rx) = mpsc::channel::<Vec<Trade>>(1);
     if shard.send(EngineCommand::Submit(order, reply_tx)).await.is_err() {
         return HttpResponse::InternalServerError()
-            .json(serde_json::json!({ "error": "shard unavailable" }));
+            .json(ErrorResponse { error: "shard unavailable".into() });
     }
 
     let trades = reply_rx.recv().await.unwrap_or_default();
@@ -105,12 +141,21 @@ pub async fn submit_order(
     HttpResponse::Ok().json(SubmitOrderResponse { order_id, trades })
 }
 
-#[derive(Deserialize)]
-pub struct CancelQuery {
-    pub symbol: String,
-    pub side: Side,
-}
-
+#[utoipa::path(
+    delete,
+    path = "/v1/orders/{id}",
+    params(
+        ("id" = String, Path, description = "Order UUID to cancel"),
+        CancelQuery,
+    ),
+    responses(
+        (status = 200, description = "Order cancelled", body = CancelOrderResponse),
+        (status = 400, description = "Invalid order UUID", body = ErrorResponse),
+        (status = 404, description = "Order or symbol not found", body = ErrorResponse),
+        (status = 500, description = "Internal engine error", body = ErrorResponse),
+    ),
+    tag = "orders"
+)]
 pub async fn cancel_order(
     path: web::Path<String>,
     query: web::Query<CancelQuery>,
@@ -121,7 +166,7 @@ pub async fn cancel_order(
         Ok(u) => u,
         Err(_) => {
             return HttpResponse::BadRequest()
-                .json(serde_json::json!({ "error": "invalid order id" }))
+                .json(ErrorResponse { error: "invalid order id".into() })
         }
     };
     let order_id = OrderId(uuid);
@@ -130,8 +175,9 @@ pub async fn cancel_order(
     let shard = match data.shards.get(&symbol_str) {
         Some(s) => s.clone(),
         None => {
-            return HttpResponse::NotFound()
-                .json(serde_json::json!({ "error": format!("symbol {} not found", symbol_str) }))
+            return HttpResponse::NotFound().json(ErrorResponse {
+                error: format!("symbol {} not found", symbol_str),
+            })
         }
     };
 
@@ -142,7 +188,7 @@ pub async fn cancel_order(
         .is_err()
     {
         return HttpResponse::InternalServerError()
-            .json(serde_json::json!({ "error": "shard unavailable" }));
+            .json(ErrorResponse { error: "shard unavailable".into() });
     }
 
     match reply_rx.recv().await.flatten() {
@@ -151,8 +197,8 @@ pub async fn cancel_order(
                 order_id,
                 symbol: Symbol::new(&symbol_str),
             });
-            HttpResponse::Ok().json(serde_json::json!({ "cancelled": order_id }))
+            HttpResponse::Ok().json(CancelOrderResponse { cancelled: order_id })
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "order not found" })),
+        None => HttpResponse::NotFound().json(ErrorResponse { error: "order not found".into() }),
     }
 }

@@ -10,3 +10,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
+utoipa = { version = "4", features = ["uuid", "chrono", "decimal"] }

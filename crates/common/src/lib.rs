@@ -1,8 +1,10 @@
 use uuid::Uuid;
 use std::fmt;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[schema(value_type = String, format = Uuid)]
 pub struct OrderId(pub Uuid);
 
 impl OrderId {
@@ -23,7 +25,8 @@ impl fmt::Display for OrderId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[schema(value_type = String, example = "AAPL")]
 pub struct Symbol(pub String);
 
 impl Symbol {

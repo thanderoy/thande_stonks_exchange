@@ -3,11 +3,13 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use common::{OrderId, Symbol};
 use crate::order::{Order, OrderType, Side, TimeInForce};
 use crate::orderbook::{OrderBook, PriceLevel};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[schema(value_type = String, format = Uuid)]
 pub struct TradeId(pub Uuid);
 
 impl TradeId {
@@ -16,7 +18,7 @@ impl TradeId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Trade {
     pub id: TradeId,
     pub symbol: Symbol,

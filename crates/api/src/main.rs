@@ -8,7 +8,10 @@ use market_data::EventBus;
 use risk::{RiskEngine, ParticipantLimits, SymbolLimits};
 use common::Symbol;
 use rust_decimal::Decimal;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 use api::handlers::{health, orders, session, ws};
+use api::openapi::ApiDoc;
 use api::state::AppState;
 
 #[tokio::main]
@@ -53,8 +56,6 @@ async fn main() -> std::io::Result<()> {
         tracing::info!("Shard started for {sym}");
     }
 
-    // Build a permissive RiskEngine with a "demo" participant pre-registered.
-    // Real deployments would load participant limits from a config file or DB.
     let mut participant_limits = HashMap::new();
     for name in ["demo", "trader1", "trader2"] {
         participant_limits.insert(name.to_string(), ParticipantLimits {
@@ -79,12 +80,19 @@ async fn main() -> std::io::Result<()> {
 
     let state = Arc::new(AppState { shards, sessions, risk, bus, pool });
 
+    let openapi = ApiDoc::openapi();
+
     tracing::info!("Listening on http://{bind_addr}");
+    tracing::info!("Swagger UI: http://{bind_addr}/swagger-ui/");
 
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
             .app_data(web::Data::new(state.clone()))
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/api-docs/openapi.json", openapi.clone()),
+            )
             .route("/healthz", web::get().to(health::healthz))
             .route("/v1/orders", web::post().to(orders::submit_order))
             .route("/v1/orders/{id}", web::delete().to(orders::cancel_order))

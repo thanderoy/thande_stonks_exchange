@@ -1,7 +1,8 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub enum SessionState {
     PreMarket,
     Open,
@@ -10,7 +11,7 @@ pub enum SessionState {
     Closed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub enum HaltReason {
     CircuitBreaker { threshold_pct: Decimal },
     RegulatoryHalt,
@@ -73,13 +74,11 @@ pub fn compute_auction_price(bids: &[(Decimal, Decimal)], asks: &[(Decimal, Deci
     let mut best_prices: Vec<Decimal> = Vec::new();
 
     for &p in &candidates {
-        // Cumulative buy demand at price p: sum of bid qty where bid_price >= p
         let demand: Decimal = bids.iter()
             .filter(|(bid_price, _)| *bid_price >= p)
             .map(|(_, qty)| *qty)
             .sum();
 
-        // Cumulative sell supply at price p: sum of ask qty where ask_price <= p
         let supply: Decimal = asks.iter()
             .filter(|(ask_price, _)| *ask_price <= p)
             .map(|(_, qty)| *qty)
@@ -100,7 +99,6 @@ pub fn compute_auction_price(bids: &[(Decimal, Decimal)], asks: &[(Decimal, Deci
         return None;
     }
 
-    // Tiebreak: price closest to the midpoint of the tied range
     if best_prices.len() == 1 {
         return Some(best_prices[0]);
     }

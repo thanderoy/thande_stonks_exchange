@@ -2,9 +2,40 @@ use std::sync::Arc;
 use actix_web::{web, HttpResponse};
 use engine::session::HaltReason;
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use crate::state::AppState;
 
+#[derive(Serialize, ToSchema)]
+pub struct SessionStateResponse {
+    pub symbol: String,
+    pub state: engine::session::SessionState,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct HaltBody {
+    /// One of "circuit_breaker", "regulatory", or any other value for TechnicalIssue
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Required when reason is "circuit_breaker" (decimal string, e.g. "10")
+    pub threshold_pct: Option<Decimal>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/session/{symbol}",
+    params(("symbol" = String, Path, description = "Ticker symbol")),
+    responses(
+        (status = 200, description = "Current session state", body = SessionStateResponse),
+        (status = 404, description = "Symbol not found", body = ErrorResponse),
+    ),
+    tag = "session"
+)]
 pub async fn get_session(
     path: web::Path<String>,
     data: web::Data<Arc<AppState>>,
@@ -13,12 +44,22 @@ pub async fn get_session(
     match data.sessions.get(&symbol) {
         Some(session) => {
             let state = session.lock().unwrap().state.clone();
-            HttpResponse::Ok().json(serde_json::json!({ "symbol": symbol, "state": state }))
+            HttpResponse::Ok().json(SessionStateResponse { symbol, state })
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "symbol not found" })),
+        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/session/{symbol}/open",
+    params(("symbol" = String, Path, description = "Ticker symbol")),
+    responses(
+        (status = 200, description = "Session opened", body = SessionStateResponse),
+        (status = 404, description = "Symbol not found", body = ErrorResponse),
+    ),
+    tag = "session"
+)]
 pub async fn open_session(
     path: web::Path<String>,
     data: web::Data<Arc<AppState>>,
@@ -27,19 +68,26 @@ pub async fn open_session(
     match data.sessions.get(&symbol) {
         Some(session) => {
             session.lock().unwrap().open();
-            HttpResponse::Ok().json(serde_json::json!({ "symbol": symbol, "state": "Open" }))
+            HttpResponse::Ok().json(SessionStateResponse {
+                symbol,
+                state: engine::session::SessionState::Open,
+            })
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "symbol not found" })),
+        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
     }
 }
 
-#[derive(Deserialize)]
-pub struct HaltBody {
-    #[serde(default)]
-    pub reason: Option<String>,
-    pub threshold_pct: Option<Decimal>,
-}
-
+#[utoipa::path(
+    post,
+    path = "/v1/session/{symbol}/halt",
+    params(("symbol" = String, Path, description = "Ticker symbol")),
+    request_body = HaltBody,
+    responses(
+        (status = 200, description = "Session halted", body = SessionStateResponse),
+        (status = 404, description = "Symbol not found", body = ErrorResponse),
+    ),
+    tag = "session"
+)]
 pub async fn halt_session(
     path: web::Path<String>,
     body: web::Json<HaltBody>,
@@ -55,13 +103,24 @@ pub async fn halt_session(
     };
     match data.sessions.get(&symbol) {
         Some(session) => {
+            let halted_state = engine::session::SessionState::Halted { reason: reason.clone() };
             session.lock().unwrap().halt(reason);
-            HttpResponse::Ok().json(serde_json::json!({ "symbol": symbol, "state": "Halted" }))
+            HttpResponse::Ok().json(SessionStateResponse { symbol, state: halted_state })
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "symbol not found" })),
+        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/session/{symbol}/resume",
+    params(("symbol" = String, Path, description = "Ticker symbol")),
+    responses(
+        (status = 200, description = "Session resumed (Open)", body = SessionStateResponse),
+        (status = 404, description = "Symbol not found", body = ErrorResponse),
+    ),
+    tag = "session"
+)]
 pub async fn resume_session(
     path: web::Path<String>,
     data: web::Data<Arc<AppState>>,
@@ -70,8 +129,11 @@ pub async fn resume_session(
     match data.sessions.get(&symbol) {
         Some(session) => {
             session.lock().unwrap().resume();
-            HttpResponse::Ok().json(serde_json::json!({ "symbol": symbol, "state": "Open" }))
+            HttpResponse::Ok().json(SessionStateResponse {
+                symbol,
+                state: engine::session::SessionState::Open,
+            })
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "symbol not found" })),
+        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
     }
 }
