@@ -16,5 +16,7 @@ pub struct HealthResponse {
     tag = "health"
 )]
 pub async fn healthz() -> HttpResponse {
-    HttpResponse::Ok().json(HealthResponse { status: "ok".into() })
+    HttpResponse::Ok().json(HealthResponse {
+        status: "ok".into(),
+    })
 }

@@ -1,6 +1,6 @@
-use std::io::{BufWriter, BufReader, Read, Write};
-use std::fs::{File, OpenOptions};
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Write};
 use uuid::Uuid;
 
 /// Self-contained WAL entry using primitive types for serialization.
@@ -43,7 +43,9 @@ pub struct WriteAheadLog {
 impl WriteAheadLog {
     pub fn open(path: &str) -> std::io::Result<Self> {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
-        Ok(Self { writer: BufWriter::new(file) })
+        Ok(Self {
+            writer: BufWriter::new(file),
+        })
     }
 
     /// Appends a length-prefixed JSON record and flushes immediately for durability.

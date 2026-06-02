@@ -1,5 +1,5 @@
-use utoipa::OpenApi;
 use crate::handlers::{health, orders, session};
+use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(

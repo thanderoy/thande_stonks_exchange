@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use actix_web::{web, HttpRequest, HttpResponse};
 use crate::state::AppState;
+use actix_web::{HttpRequest, HttpResponse, web};
+use std::sync::Arc;
 
 pub async fn stream(
     req: HttpRequest,

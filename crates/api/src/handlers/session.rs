@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use actix_web::{web, HttpResponse};
+use crate::state::AppState;
+use actix_web::{HttpResponse, web};
 use engine::session::HaltReason;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use utoipa::ToSchema;
-use crate::state::AppState;
 
 #[derive(Serialize, ToSchema)]
 pub struct SessionStateResponse {
@@ -36,17 +36,16 @@ pub struct HaltBody {
     ),
     tag = "session"
 )]
-pub async fn get_session(
-    path: web::Path<String>,
-    data: web::Data<Arc<AppState>>,
-) -> HttpResponse {
+pub async fn get_session(path: web::Path<String>, data: web::Data<Arc<AppState>>) -> HttpResponse {
     let symbol = path.into_inner();
     match data.sessions.get(&symbol) {
         Some(session) => {
             let state = session.lock().unwrap().state.clone();
             HttpResponse::Ok().json(SessionStateResponse { symbol, state })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: "symbol not found".into(),
+        }),
     }
 }
 
@@ -60,10 +59,7 @@ pub async fn get_session(
     ),
     tag = "session"
 )]
-pub async fn open_session(
-    path: web::Path<String>,
-    data: web::Data<Arc<AppState>>,
-) -> HttpResponse {
+pub async fn open_session(path: web::Path<String>, data: web::Data<Arc<AppState>>) -> HttpResponse {
     let symbol = path.into_inner();
     match data.sessions.get(&symbol) {
         Some(session) => {
@@ -73,7 +69,9 @@ pub async fn open_session(
                 state: engine::session::SessionState::Open,
             })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: "symbol not found".into(),
+        }),
     }
 }
 
@@ -103,11 +101,18 @@ pub async fn halt_session(
     };
     match data.sessions.get(&symbol) {
         Some(session) => {
-            let halted_state = engine::session::SessionState::Halted { reason: reason.clone() };
+            let halted_state = engine::session::SessionState::Halted {
+                reason: reason.clone(),
+            };
             session.lock().unwrap().halt(reason);
-            HttpResponse::Ok().json(SessionStateResponse { symbol, state: halted_state })
+            HttpResponse::Ok().json(SessionStateResponse {
+                symbol,
+                state: halted_state,
+            })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: "symbol not found".into(),
+        }),
     }
 }
 
@@ -134,6 +139,8 @@ pub async fn resume_session(
                 state: engine::session::SessionState::Open,
             })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse { error: "symbol not found".into() }),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: "symbol not found".into(),
+        }),
     }
 }

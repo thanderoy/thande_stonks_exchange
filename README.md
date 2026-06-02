@@ -1,10 +1,10 @@
 # Thande Stonks Exchange
 
-A price-time priority continuous matching engine written in Rust. Implements order submission, cancellation, risk checks, trade persistence, and a real-time market data stream.
+A price-time priority continuous matching engine written in Rust. Implements order submission, cancellation, pre-trade risk checks, trade persistence, and a real-time market data stream.
 
 ## Architecture
 
-``` bash
+```
 Client (HTTP/WS)
       │
       ▼
@@ -37,7 +37,7 @@ Client (HTTP/WS)
        │
        ▼
 ┌─────────────┐
-│ persistence │  Write-ahead log (WAL) + Postgres ledger
+│ persistence │  Write-ahead log (WAL) + Postgres trade ledger
 │             │  (DB optional — set DATABASE_URL to enable)
 └─────────────┘
 ```
@@ -53,16 +53,16 @@ Client (HTTP/WS)
 | `market_data` | `EventBus` broadcasting `MarketEvent` to WebSocket subscribers |
 | `api` | HTTP REST + WebSocket server; wires all crates together |
 
-## Running the exchange
+## Running locally
 
 ```bash
 # Build everything
 cargo build --workspace --release
 
-# Start with one symbol (default: AAPL on 127.0.0.1:8080)
+# Start with default symbol (AAPL) on 127.0.0.1:8080
 cargo run -p api
 
-# Start with multiple symbols on a custom address
+# Multiple symbols on a custom address
 SYMBOLS=AAPL,MSFT,GOOGL API_BIND_ADDR=0.0.0.0:9000 cargo run -p api
 
 # With Postgres persistence (optional)
@@ -77,6 +77,33 @@ DATABASE_URL=postgres://user:pass@localhost/exchange cargo run -p api
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
 | `RUST_LOG` | _(none)_ | Log filter, e.g. `api=debug` |
+
+## Running with Docker
+
+Copy the env template and fill in credentials:
+
+```bash
+cp .env.example .env
+# edit .env — set POSTGRES_PASSWORD and any other overrides
+```
+
+Start both the exchange and Postgres:
+
+```bash
+docker compose up --build
+```
+
+The API is available on port 8080 (configurable via `API_BIND_ADDR` in `.env`). The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
+
+Stop and remove volumes:
+
+```bash
+docker compose down -v
+```
+
+## API documentation
+
+Interactive Swagger UI is served at [`http://localhost:8080/swagger-ui/`](http://localhost:8080/swagger-ui/) when the server is running. The raw OpenAPI 3.0 spec is at `/api-docs/openapi.json`.
 
 ## REST API
 
@@ -133,7 +160,7 @@ curl http://localhost:8080/healthz
 
 ### Pre-registered clients
 
-The demo server registers `demo`, `trader1`, and `trader2` with permissive limits (10 M notional, 1 M max position). Use one of these as `client_id` in order requests.
+The server registers `demo`, `trader1`, and `trader2` at startup with permissive limits (10 M notional, 1 M max position). Use one of these as `client_id` in order requests.
 
 ## WebSocket market data stream
 
@@ -154,14 +181,14 @@ Example events:
 ## Testing
 
 ```bash
-cargo test --workspace          # all 75 tests
+cargo test --workspace          # 70 tests
 cargo test --test engine_matcher # single test binary
 cargo bench                     # matching engine benchmarks
 cargo clippy --workspace        # lint
 cargo fmt --check               # formatting
 ```
 
-## Postgres setup (optional)
+## Postgres setup (manual)
 
 ```bash
 createdb exchange

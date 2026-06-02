@@ -10,11 +10,25 @@ fn sym() -> Symbol {
 }
 
 fn bid(price: Decimal, qty: Decimal) -> Order {
-    Order::new_limit(sym(), Side::Buy, price, qty, TimeInForce::GoodTillCanceled, "c1")
+    Order::new_limit(
+        sym(),
+        Side::Buy,
+        price,
+        qty,
+        TimeInForce::GoodTillCanceled,
+        "c1",
+    )
 }
 
 fn ask(price: Decimal, qty: Decimal) -> Order {
-    Order::new_limit(sym(), Side::Sell, price, qty, TimeInForce::GoodTillCanceled, "c1")
+    Order::new_limit(
+        sym(),
+        Side::Sell,
+        price,
+        qty,
+        TimeInForce::GoodTillCanceled,
+        "c1",
+    )
 }
 
 #[test]

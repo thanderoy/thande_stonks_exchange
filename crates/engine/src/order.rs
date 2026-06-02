@@ -1,8 +1,8 @@
-use rust_decimal::Decimal;
 use chrono::{DateTime, Utc};
+use common::{OrderId, Symbol};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use common::{OrderId, Symbol};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum Side {
@@ -14,8 +14,13 @@ pub enum Side {
 #[serde(tag = "type")]
 pub enum OrderType {
     Market,
-    Limit { price: Decimal },
-    StopLimit { stop_price: Decimal, limit_price: Decimal },
+    Limit {
+        price: Decimal,
+    },
+    StopLimit {
+        stop_price: Decimal,
+        limit_price: Decimal,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

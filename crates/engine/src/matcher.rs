@@ -1,12 +1,12 @@
-use std::collections::VecDeque;
-use rust_decimal::Decimal;
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
-use common::{OrderId, Symbol};
 use crate::order::{Order, OrderType, Side, TimeInForce};
 use crate::orderbook::{OrderBook, PriceLevel};
+use chrono::{DateTime, Utc};
+use common::{OrderId, Symbol};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[schema(value_type = String, format = Uuid)]
@@ -82,8 +82,16 @@ pub fn match_order(book: &mut OrderBook, incoming: Order) -> Vec<Trade> {
                 symbol: incoming.symbol.clone(),
                 price,
                 quantity: fill_qty,
-                buyer_order_id: if incoming.side == Side::Buy { incoming.id } else { resting.id },
-                seller_order_id: if incoming.side == Side::Sell { incoming.id } else { resting.id },
+                buyer_order_id: if incoming.side == Side::Buy {
+                    incoming.id
+                } else {
+                    resting.id
+                },
+                seller_order_id: if incoming.side == Side::Sell {
+                    incoming.id
+                } else {
+                    resting.id
+                },
                 executed_at: Utc::now(),
             });
             remaining_qty -= fill_qty;
