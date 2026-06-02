@@ -1,15 +1,16 @@
 use rust_decimal::Decimal;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use common::{OrderId, Symbol};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum Side {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum OrderType {
     Market,
@@ -17,7 +18,7 @@ pub enum OrderType {
     StopLimit { stop_price: Decimal, limit_price: Decimal },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum TimeInForce {
     GoodTillCanceled,
     ImmediateOrCancel,
@@ -25,7 +26,7 @@ pub enum TimeInForce {
     Day,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Order {
     pub id: OrderId,
     pub symbol: Symbol,
