@@ -1,10 +1,10 @@
 pub mod circuit_breaker;
 
-use std::collections::HashMap;
-use rust_decimal::Decimal;
-use thiserror::Error;
 use common::Symbol;
 use engine::order::{Order, OrderType, Side};
+use rust_decimal::Decimal;
+use std::collections::HashMap;
+use thiserror::Error;
 
 pub type ClientId = String;
 
@@ -54,7 +54,9 @@ impl RiskEngine {
 
     fn check_symbol_active(&self, order: &Order) -> Result<(), RiskError> {
         match self.symbol_limits.get(&order.symbol) {
-            Some(limits) if !limits.active => Err(RiskError::SymbolNotActive(order.symbol.to_string())),
+            Some(limits) if !limits.active => {
+                Err(RiskError::SymbolNotActive(order.symbol.to_string()))
+            }
             _ => Ok(()),
         }
     }
@@ -69,7 +71,9 @@ impl RiskEngine {
             OrderType::StopLimit { limit_price, .. } => *limit_price,
             OrderType::Market => return Ok(()),
         };
-        let deviation = ((price - limits.reference_price) / limits.reference_price * Decimal::ONE_HUNDRED).abs();
+        let deviation = ((price - limits.reference_price) / limits.reference_price
+            * Decimal::ONE_HUNDRED)
+            .abs();
         if deviation > limits.price_collar_pct {
             Err(RiskError::PriceOutsideCollar)
         } else {
@@ -99,7 +103,11 @@ impl RiskEngine {
             Some(l) => l,
             None => return Err(RiskError::UnknownParticipant(order.client_id.clone())),
         };
-        let current = limits.current_position.get(&order.symbol).copied().unwrap_or(Decimal::ZERO);
+        let current = limits
+            .current_position
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
         let new_position = match order.side {
             Side::Buy => current + order.quantity,
             Side::Sell => current - order.quantity,

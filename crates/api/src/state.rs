@@ -1,10 +1,10 @@
-use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
-use tokio::sync::mpsc;
-use engine::shard::EngineCommand;
 use engine::session::TradingSession;
-use risk::RiskEngine;
+use engine::shard::EngineCommand;
 use market_data::EventBus;
+use risk::RiskEngine;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 
 pub struct AppState {
     /// symbol string → shard command channel

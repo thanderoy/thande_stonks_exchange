@@ -1,8 +1,8 @@
-use tokio::sync::mpsc;
-use crate::matcher::{cancel_order, match_order, Trade};
+use crate::matcher::{Trade, cancel_order, match_order};
 use crate::order::{Order, Side};
 use crate::orderbook::OrderBook;
 use common::{OrderId, Symbol};
+use tokio::sync::mpsc;
 
 pub enum EngineCommand {
     Submit(Order, mpsc::Sender<Vec<Trade>>),

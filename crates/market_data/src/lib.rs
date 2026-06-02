@@ -1,7 +1,7 @@
-use tokio::sync::broadcast;
-use serde::{Deserialize, Serialize};
 use common::{OrderId, Symbol};
 use engine::matcher::Trade;
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]

@@ -1,9 +1,11 @@
-use uuid::Uuid;
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 #[schema(value_type = String, format = Uuid)]
 pub struct OrderId(pub Uuid);
 

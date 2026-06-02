@@ -1,15 +1,15 @@
-use std::sync::Arc;
-use actix_web::{web, HttpResponse};
-use serde::{Deserialize, Serialize};
-use utoipa::{IntoParams, ToSchema};
-use rust_decimal::Decimal;
-use tokio::sync::mpsc;
+use crate::state::AppState;
+use actix_web::{HttpResponse, web};
 use common::{OrderId, Symbol};
+use engine::matcher::Trade;
 use engine::order::{Order, OrderType, Side, TimeInForce};
 use engine::shard::EngineCommand;
-use engine::matcher::Trade;
 use market_data::MarketEvent;
-use crate::state::AppState;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Deserialize, ToSchema)]
 pub struct SubmitOrderRequest {
@@ -82,14 +82,20 @@ pub async fn submit_order(
             body.time_in_force.clone(),
             &body.client_id,
         ),
-        OrderType::StopLimit { stop_price, limit_price } => {
+        OrderType::StopLimit {
+            stop_price,
+            limit_price,
+        } => {
             use chrono::Utc;
             let now = Utc::now();
             Order {
                 id: OrderId::new(),
                 symbol: symbol.clone(),
                 side: body.side.clone(),
-                order_type: OrderType::StopLimit { stop_price: *stop_price, limit_price: *limit_price },
+                order_type: OrderType::StopLimit {
+                    stop_price: *stop_price,
+                    limit_price: *limit_price,
+                },
                 quantity: body.quantity,
                 filled_quantity: Decimal::ZERO,
                 time_in_force: body.time_in_force.clone(),
@@ -105,7 +111,9 @@ pub async fn submit_order(
     let order_id = order.id;
 
     if let Err(e) = data.risk.check(&order) {
-        return HttpResponse::BadRequest().json(ErrorResponse { error: e.to_string() });
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: e.to_string(),
+        });
     }
 
     let shard = match data.shards.get(&body.symbol) {
@@ -113,14 +121,19 @@ pub async fn submit_order(
         None => {
             return HttpResponse::NotFound().json(ErrorResponse {
                 error: format!("symbol {} not found", body.symbol),
-            })
+            });
         }
     };
 
     let (reply_tx, mut reply_rx) = mpsc::channel::<Vec<Trade>>(1);
-    if shard.send(EngineCommand::Submit(order, reply_tx)).await.is_err() {
-        return HttpResponse::InternalServerError()
-            .json(ErrorResponse { error: "shard unavailable".into() });
+    if shard
+        .send(EngineCommand::Submit(order, reply_tx))
+        .await
+        .is_err()
+    {
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "shard unavailable".into(),
+        });
     }
 
     let trades = reply_rx.recv().await.unwrap_or_default();
@@ -133,10 +146,8 @@ pub async fn submit_order(
         }
     }
 
-    data.bus.publish(MarketEvent::OrderAccepted {
-        order_id,
-        symbol,
-    });
+    data.bus
+        .publish(MarketEvent::OrderAccepted { order_id, symbol });
 
     HttpResponse::Ok().json(SubmitOrderResponse { order_id, trades })
 }
@@ -165,8 +176,9 @@ pub async fn cancel_order(
     let uuid = match order_id_str.parse::<uuid::Uuid>() {
         Ok(u) => u,
         Err(_) => {
-            return HttpResponse::BadRequest()
-                .json(ErrorResponse { error: "invalid order id".into() })
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: "invalid order id".into(),
+            });
         }
     };
     let order_id = OrderId(uuid);
@@ -177,18 +189,23 @@ pub async fn cancel_order(
         None => {
             return HttpResponse::NotFound().json(ErrorResponse {
                 error: format!("symbol {} not found", symbol_str),
-            })
+            });
         }
     };
 
     let (reply_tx, mut reply_rx) = mpsc::channel::<Option<Order>>(1);
     if shard
-        .send(EngineCommand::Cancel(order_id, query.side.clone(), reply_tx))
+        .send(EngineCommand::Cancel(
+            order_id,
+            query.side.clone(),
+            reply_tx,
+        ))
         .await
         .is_err()
     {
-        return HttpResponse::InternalServerError()
-            .json(ErrorResponse { error: "shard unavailable".into() });
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "shard unavailable".into(),
+        });
     }
 
     match reply_rx.recv().await.flatten() {
@@ -197,8 +214,12 @@ pub async fn cancel_order(
                 order_id,
                 symbol: Symbol::new(&symbol_str),
             });
-            HttpResponse::Ok().json(CancelOrderResponse { cancelled: order_id })
+            HttpResponse::Ok().json(CancelOrderResponse {
+                cancelled: order_id,
+            })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse { error: "order not found".into() }),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: "order not found".into(),
+        }),
     }
 }

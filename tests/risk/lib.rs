@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use common::Symbol;
 use engine::order::{Order, Side, TimeInForce};
 use risk::{ParticipantLimits, RiskEngine, RiskError, SymbolLimits};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::collections::HashMap;
 
 fn sym() -> Symbol {
     Symbol::new("AAPL")
@@ -29,11 +29,21 @@ fn make_engine() -> RiskEngine {
             reference_price: dec!(100),
         },
     );
-    RiskEngine { participant_limits, symbol_limits }
+    RiskEngine {
+        participant_limits,
+        symbol_limits,
+    }
 }
 
 fn buy(price: Decimal, qty: Decimal) -> Order {
-    Order::new_limit(sym(), Side::Buy, price, qty, TimeInForce::GoodTillCanceled, "client1")
+    Order::new_limit(
+        sym(),
+        Side::Buy,
+        price,
+        qty,
+        TimeInForce::GoodTillCanceled,
+        "client1",
+    )
 }
 
 #[test]
@@ -45,17 +55,26 @@ fn valid_order_passes_all_checks() {
 fn inactive_symbol_is_rejected() {
     let mut engine = make_engine();
     engine.symbol_limits.get_mut(&sym()).unwrap().active = false;
-    assert!(matches!(engine.check(&buy(dec!(100), dec!(10))), Err(RiskError::SymbolNotActive(_))));
+    assert!(matches!(
+        engine.check(&buy(dec!(100), dec!(10))),
+        Err(RiskError::SymbolNotActive(_))
+    ));
 }
 
 #[test]
 fn price_above_collar_is_rejected() {
-    assert!(matches!(make_engine().check(&buy(dec!(116), dec!(1))), Err(RiskError::PriceOutsideCollar)));
+    assert!(matches!(
+        make_engine().check(&buy(dec!(116), dec!(1))),
+        Err(RiskError::PriceOutsideCollar)
+    ));
 }
 
 #[test]
 fn price_below_collar_is_rejected() {
-    assert!(matches!(make_engine().check(&buy(dec!(84), dec!(1))), Err(RiskError::PriceOutsideCollar)));
+    assert!(matches!(
+        make_engine().check(&buy(dec!(84), dec!(1))),
+        Err(RiskError::PriceOutsideCollar)
+    ));
 }
 
 #[test]
@@ -67,21 +86,41 @@ fn price_at_collar_boundary_is_accepted() {
 #[test]
 fn notional_over_limit_is_rejected() {
     // 100 * 105 = 10_500 > 10_000
-    assert!(matches!(make_engine().check(&buy(dec!(100), dec!(105))), Err(RiskError::NotionalLimitExceeded)));
+    assert!(matches!(
+        make_engine().check(&buy(dec!(100), dec!(105))),
+        Err(RiskError::NotionalLimitExceeded)
+    ));
 }
 
 #[test]
 fn position_over_limit_is_rejected() {
     let mut engine = make_engine();
     // Raise notional ceiling so only the position check triggers at qty=1001
-    engine.participant_limits.get_mut("client1").unwrap().max_notional_per_order = dec!(200_000);
-    assert!(matches!(engine.check(&buy(dec!(100), dec!(1001))), Err(RiskError::PositionLimitExceeded)));
+    engine
+        .participant_limits
+        .get_mut("client1")
+        .unwrap()
+        .max_notional_per_order = dec!(200_000);
+    assert!(matches!(
+        engine.check(&buy(dec!(100), dec!(1001))),
+        Err(RiskError::PositionLimitExceeded)
+    ));
 }
 
 #[test]
 fn unknown_participant_is_rejected() {
-    let order = Order::new_limit(sym(), Side::Buy, dec!(100), dec!(10), TimeInForce::GoodTillCanceled, "unknown");
-    assert!(matches!(make_engine().check(&order), Err(RiskError::UnknownParticipant(_))));
+    let order = Order::new_limit(
+        sym(),
+        Side::Buy,
+        dec!(100),
+        dec!(10),
+        TimeInForce::GoodTillCanceled,
+        "unknown",
+    );
+    assert!(matches!(
+        make_engine().check(&order),
+        Err(RiskError::UnknownParticipant(_))
+    ));
 }
 
 #[test]

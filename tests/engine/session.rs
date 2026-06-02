@@ -27,7 +27,9 @@ fn open_enables_matching() {
 fn halt_blocks_matching_and_order_acceptance() {
     let mut s = TradingSession::new();
     s.open();
-    s.halt(HaltReason::CircuitBreaker { threshold_pct: dec!(10) });
+    s.halt(HaltReason::CircuitBreaker {
+        threshold_pct: dec!(10),
+    });
     assert!(!s.can_match());
     assert!(!s.can_accept_orders());
     assert!(matches!(s.state, SessionState::Halted { .. }));
@@ -64,7 +66,9 @@ fn close_ends_session() {
 #[test]
 fn halt_reasons_are_distinct() {
     assert_ne!(
-        HaltReason::CircuitBreaker { threshold_pct: dec!(5) },
+        HaltReason::CircuitBreaker {
+            threshold_pct: dec!(5)
+        },
         HaltReason::RegulatoryHalt
     );
     assert_ne!(HaltReason::RegulatoryHalt, HaltReason::TechnicalIssue);
@@ -99,8 +103,16 @@ fn auction_price_single_crossing_level() {
 fn auction_price_realistic_ladder() {
     // Bids: 102 × 30, 101 × 50, 100 × 100
     // Asks: 99 × 20, 100 × 40, 101 × 60
-    let bids = [(dec!(102), dec!(30)), (dec!(101), dec!(50)), (dec!(100), dec!(100))];
-    let asks = [(dec!(99), dec!(20)), (dec!(100), dec!(40)), (dec!(101), dec!(60))];
+    let bids = [
+        (dec!(102), dec!(30)),
+        (dec!(101), dec!(50)),
+        (dec!(100), dec!(100)),
+    ];
+    let asks = [
+        (dec!(99), dec!(20)),
+        (dec!(100), dec!(40)),
+        (dec!(101), dec!(60)),
+    ];
     // At price 100: demand (bid >= 100) = 30+50+100=180; supply (ask <= 100) = 20+40=60; match = 60
     // At price 101: demand = 30+50=80; supply = 20+40+60=120; match = 80
     // At price 102: demand = 30; supply = 120; match = 30

@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, VecDeque};
-use rust_decimal::Decimal;
 use crate::order::Order;
 use common::Symbol;
+use rust_decimal::Decimal;
+use std::collections::{BTreeMap, VecDeque};
 
 pub struct PriceLevel {
     pub orders: VecDeque<Order>,
@@ -16,7 +16,11 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn new(symbol: Symbol) -> Self {
-        Self { symbol, bids: BTreeMap::new(), asks: BTreeMap::new() }
+        Self {
+            symbol,
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+        }
     }
 
     pub fn best_bid(&self) -> Option<Decimal> {

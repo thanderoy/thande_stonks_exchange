@@ -48,7 +48,10 @@ fn append_and_replay_multiple_entries_in_order() {
     let tmp = NamedTempFile::new().unwrap();
     let entries = vec![
         order_submitted("AAPL"),
-        WalEntry::OrderCancelled { order_id: Uuid::new_v4(), timestamp: "2024-01-01T00:00:00Z".to_string() },
+        WalEntry::OrderCancelled {
+            order_id: Uuid::new_v4(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+        },
         WalEntry::TradeExecuted {
             trade_id: Uuid::new_v4(),
             symbol: "AAPL".to_string(),
@@ -58,7 +61,10 @@ fn append_and_replay_multiple_entries_in_order() {
             seller_order_id: Uuid::new_v4(),
             executed_at: "2024-01-01T00:00:01Z".to_string(),
         },
-        WalEntry::SessionStateChanged { symbol: "AAPL".to_string(), state: "open".to_string() },
+        WalEntry::SessionStateChanged {
+            symbol: "AAPL".to_string(),
+            state: "open".to_string(),
+        },
     ];
     {
         let mut wal = WriteAheadLog::open(tmp_path(&tmp)).unwrap();
@@ -95,7 +101,10 @@ fn all_entry_variants_roundtrip() {
             price: None,
             client_id: "c".to_string(),
         },
-        WalEntry::OrderCancelled { order_id: Uuid::new_v4(), timestamp: "t".to_string() },
+        WalEntry::OrderCancelled {
+            order_id: Uuid::new_v4(),
+            timestamp: "t".to_string(),
+        },
         WalEntry::TradeExecuted {
             trade_id: Uuid::new_v4(),
             symbol: "X".to_string(),
@@ -105,7 +114,10 @@ fn all_entry_variants_roundtrip() {
             seller_order_id: Uuid::new_v4(),
             executed_at: "t".to_string(),
         },
-        WalEntry::SessionStateChanged { symbol: "X".to_string(), state: "closed".to_string() },
+        WalEntry::SessionStateChanged {
+            symbol: "X".to_string(),
+            state: "closed".to_string(),
+        },
     ];
     {
         let mut wal = WriteAheadLog::open(tmp_path(&tmp)).unwrap();

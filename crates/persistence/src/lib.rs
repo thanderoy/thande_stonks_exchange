@@ -1,2 +1,2 @@
-pub mod wal;
 pub mod ledger;
+pub mod wal;

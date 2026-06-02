@@ -24,7 +24,9 @@ pub struct TradingSession {
 
 impl TradingSession {
     pub fn new() -> Self {
-        Self { state: SessionState::PreMarket }
+        Self {
+            state: SessionState::PreMarket,
+        }
     }
 
     pub fn can_accept_orders(&self) -> bool {
@@ -58,13 +60,18 @@ impl TradingSession {
 ///
 /// Each entry is `(price, cumulative_quantity)` — bids sorted descending, asks ascending.
 /// Returns `None` if no price clears any volume (no crossing).
-pub fn compute_auction_price(bids: &[(Decimal, Decimal)], asks: &[(Decimal, Decimal)]) -> Option<Decimal> {
+pub fn compute_auction_price(
+    bids: &[(Decimal, Decimal)],
+    asks: &[(Decimal, Decimal)],
+) -> Option<Decimal> {
     if bids.is_empty() || asks.is_empty() {
         return None;
     }
 
     // Candidate prices are the union of all bid and ask price levels.
-    let mut candidates: Vec<Decimal> = bids.iter().map(|(p, _)| *p)
+    let mut candidates: Vec<Decimal> = bids
+        .iter()
+        .map(|(p, _)| *p)
         .chain(asks.iter().map(|(p, _)| *p))
         .collect();
     candidates.sort();
@@ -74,12 +81,14 @@ pub fn compute_auction_price(bids: &[(Decimal, Decimal)], asks: &[(Decimal, Deci
     let mut best_prices: Vec<Decimal> = Vec::new();
 
     for &p in &candidates {
-        let demand: Decimal = bids.iter()
+        let demand: Decimal = bids
+            .iter()
             .filter(|(bid_price, _)| *bid_price >= p)
             .map(|(_, qty)| *qty)
             .sum();
 
-        let supply: Decimal = asks.iter()
+        let supply: Decimal = asks
+            .iter()
             .filter(|(ask_price, _)| *ask_price <= p)
             .map(|(_, qty)| *qty)
             .sum();

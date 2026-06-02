@@ -1,8 +1,8 @@
-use std::time::Duration;
 use engine::session::{HaltReason, SessionState, TradingSession};
 use risk::circuit_breaker::CircuitBreaker;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::time::Duration;
 
 fn cb(threshold: Decimal) -> CircuitBreaker {
     CircuitBreaker {
@@ -53,6 +53,8 @@ fn halted_session_state_contains_circuit_breaker_reason() {
     cb(dec!(5)).check_trade(dec!(110), &mut session);
     assert!(matches!(
         session.state,
-        SessionState::Halted { reason: HaltReason::CircuitBreaker { .. } }
+        SessionState::Halted {
+            reason: HaltReason::CircuitBreaker { .. }
+        }
     ));
 }

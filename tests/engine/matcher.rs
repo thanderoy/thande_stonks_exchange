@@ -10,11 +10,25 @@ fn sym() -> Symbol {
 }
 
 fn bid(price: Decimal, qty: Decimal) -> Order {
-    Order::new_limit(sym(), Side::Buy, price, qty, TimeInForce::GoodTillCanceled, "buyer")
+    Order::new_limit(
+        sym(),
+        Side::Buy,
+        price,
+        qty,
+        TimeInForce::GoodTillCanceled,
+        "buyer",
+    )
 }
 
 fn ask(price: Decimal, qty: Decimal) -> Order {
-    Order::new_limit(sym(), Side::Sell, price, qty, TimeInForce::GoodTillCanceled, "seller")
+    Order::new_limit(
+        sym(),
+        Side::Sell,
+        price,
+        qty,
+        TimeInForce::GoodTillCanceled,
+        "seller",
+    )
 }
 
 fn book() -> OrderBook {
@@ -123,7 +137,14 @@ fn gtc_unfilled_buy_rests_in_book() {
 #[test]
 fn ioc_unfilled_is_discarded() {
     let mut b = book();
-    let o = Order::new_limit(sym(), Side::Buy, dec!(100), dec!(10), TimeInForce::ImmediateOrCancel, "c1");
+    let o = Order::new_limit(
+        sym(),
+        Side::Buy,
+        dec!(100),
+        dec!(10),
+        TimeInForce::ImmediateOrCancel,
+        "c1",
+    );
     let trades = match_order(&mut b, o);
     assert!(trades.is_empty());
     assert!(b.bids.is_empty());
@@ -142,7 +163,14 @@ fn buy_does_not_cross_above_limit_price() {
 fn sell_does_not_cross_below_limit_price() {
     let mut b = book();
     add_to_book(&mut b, bid(dec!(95), dec!(10)));
-    let o = Order::new_limit(sym(), Side::Sell, dec!(100), dec!(10), TimeInForce::GoodTillCanceled, "s1");
+    let o = Order::new_limit(
+        sym(),
+        Side::Sell,
+        dec!(100),
+        dec!(10),
+        TimeInForce::GoodTillCanceled,
+        "s1",
+    );
     let trades = match_order(&mut b, o);
     assert!(trades.is_empty());
     assert_eq!(b.best_ask(), Some(dec!(100)));
