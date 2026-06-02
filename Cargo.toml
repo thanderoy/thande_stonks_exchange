@@ -9,6 +9,7 @@ members = [
     "crates/common",
     "crates/engine",
     "crates/market_data",
+    "crates/monitor",
     "crates/persistence",
     "crates/risk",
 ]

@@ -1,5 +1,5 @@
 use actix_web::{App, HttpServer, middleware, web};
-use api::handlers::{health, orders, session, ws};
+use api::handlers::{book, health, orders, session, ws};
 use api::openapi::ApiDoc;
 use api::state::AppState;
 use common::Symbol;
@@ -128,6 +128,7 @@ async fn main() -> std::io::Result<()> {
                 "/v1/session/{symbol}/resume",
                 web::post().to(session::resume_session),
             )
+            .route("/v1/book/{symbol}", web::get().to(book::get_book))
             .route("/v1/stream", web::get().to(ws::stream))
     })
     .bind(&bind_addr)?

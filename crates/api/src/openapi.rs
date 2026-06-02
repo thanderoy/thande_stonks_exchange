@@ -1,4 +1,4 @@
-use crate::handlers::{health, orders, session};
+use crate::handlers::{book, health, orders, session};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -18,6 +18,7 @@ use utoipa::OpenApi;
         session::open_session,
         session::halt_session,
         session::resume_session,
+        book::get_book,
     ),
     components(
         schemas(
@@ -30,6 +31,7 @@ use utoipa::OpenApi;
             session::SessionStateResponse,
             session::HaltBody,
             session::ErrorResponse,
+            book::BookResponse,
             // engine types referenced in request/response bodies
             engine::order::Side,
             engine::order::OrderType,
@@ -47,6 +49,7 @@ use utoipa::OpenApi;
         (name = "orders", description = "Submit and cancel orders"),
         (name = "session", description = "Trading session lifecycle"),
         (name = "health", description = "Service health"),
+        (name = "book", description = "Order book snapshots"),
     )
 )]
 pub struct ApiDoc;

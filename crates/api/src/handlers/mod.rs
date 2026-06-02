@@ -1,3 +1,4 @@
+pub mod book;
 pub mod health;
 pub mod orders;
 pub mod session;
