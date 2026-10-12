@@ -1,14 +1,14 @@
-use server::exchange::ExchangeError;
-use server::state::AppState;
 use common::Symbol;
 use engine::order::{Order, Side, TimeInForce};
 use engine::session::{HaltReason, SessionState};
 use engine::shard::{BookSnapshot, EngineCommand};
 use market_data::EventBus;
-use persistence::wal::WriteAheadLog;
-use risk::{ParticipantLimits, RiskEngine, SymbolLimits};
+use persistence::wal::{WalEntry, WriteAheadLog};
+use risk::{ParticipantLimits, RiskEngine, RiskError, SymbolLimits};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use server::exchange::{ExchangeError, Participant};
+use server::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -39,10 +39,7 @@ fn risk() -> RiskEngine {
             reference_price: dec!(100),
         },
     )]);
-    RiskEngine {
-        participant_limits,
-        symbol_limits,
-    }
+    RiskEngine::new(participant_limits, symbol_limits)
 }
 
 fn state() -> AppState {
@@ -258,4 +255,125 @@ async fn replay_skips_symbols_not_configured() {
         .await
         .unwrap();
     assert_eq!((stats.applied, stats.skipped), (0, 1));
+}
+
+fn register_guest(state: &AppState, name: &str) -> Participant {
+    state
+        .register_participant(name.to_string(), dec!(100_000), dec!(10_000), 5)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn registered_guest_can_trade_and_has_limits() {
+    let s = state();
+    let guest = register_guest(&s, "Guest One");
+    assert!(guest.client_id.starts_with("g-"));
+    assert_eq!(guest.client_id.len(), 12);
+    assert_eq!(s.participant(&guest.client_id), Some(guest.clone()));
+    s.submit(limit(Side::Buy, dec!(100), dec!(5), &guest.client_id))
+        .await
+        .unwrap();
+    // 100 * 1001 = 100_100 > the guest's 100_000 notional limit.
+    assert!(matches!(
+        s.submit(limit(Side::Buy, dec!(100), dec!(1001), &guest.client_id))
+            .await,
+        Err(ExchangeError::Risk(RiskError::NotionalLimitExceeded))
+    ));
+}
+
+#[tokio::test]
+async fn order_rate_limit_rejects_with_429() {
+    let s = state();
+    let guest = register_guest(&s, "Speedy");
+    for _ in 0..5 {
+        s.submit(limit(Side::Buy, dec!(100), dec!(1), &guest.client_id))
+            .await
+            .unwrap();
+    }
+    let err = s
+        .submit(limit(Side::Buy, dec!(100), dec!(1), &guest.client_id))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        ExchangeError::Risk(RiskError::RateLimitExceeded(5))
+    ));
+    assert_eq!(err.status(), 429);
+}
+
+#[tokio::test]
+async fn cancel_owned_only_cancels_the_owners_order() {
+    let s = state();
+    let order = limit(Side::Buy, dec!(100), dec!(5), "alice");
+    let id = order.id;
+    s.submit(order).await.unwrap();
+
+    assert!(
+        s.cancel_owned(id, SYM, Side::Buy, "bob")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(book(&s).await.bids, vec![(dec!(100), dec!(5))]);
+    assert!(
+        s.cancel_owned(id, SYM, Side::Buy, "alice")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(book(&s).await.bids.is_empty());
+}
+
+#[tokio::test]
+async fn rejected_owned_cancel_is_not_logged() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("exchange.wal");
+    let path = path.to_str().unwrap();
+    let live = state();
+    *live.wal.lock().unwrap() = Some(WriteAheadLog::open(path).unwrap());
+    let order = limit(Side::Buy, dec!(100), dec!(5), "alice");
+    let id = order.id;
+    live.submit(order).await.unwrap();
+    live.cancel_owned(id, SYM, Side::Buy, "bob").await.unwrap();
+
+    let entries = WriteAheadLog::replay(path).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(matches!(entries[0], WalEntry::OrderSubmitted { .. }));
+}
+
+#[tokio::test]
+async fn replay_restores_registered_guest_and_resting_order() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("exchange.wal");
+    let path = path.to_str().unwrap();
+
+    let live = state();
+    *live.wal.lock().unwrap() = Some(WriteAheadLog::open(path).unwrap());
+    let guest = register_guest(&live, "Replay Me");
+    let resting = limit(Side::Sell, dec!(105), dec!(8), &guest.client_id);
+    let resting_id = resting.id;
+    live.submit(resting).await.unwrap();
+
+    let (_, entries) = WriteAheadLog::open_for_recovery(path).unwrap();
+    assert!(matches!(entries[0], WalEntry::ParticipantRegistered { .. }));
+    let recovered = state();
+    let stats = recovered.replay(entries).await.unwrap();
+    assert_eq!((stats.applied, stats.skipped), (2, 0));
+
+    assert_eq!(recovered.participant(&guest.client_id), Some(guest.clone()));
+    {
+        let risk = recovered.risk.lock().unwrap();
+        let limits = &risk.participant_limits[&guest.client_id];
+        assert_eq!(limits.max_notional_per_order, dec!(100_000));
+        assert_eq!(limits.max_position, dec!(10_000));
+        assert_eq!(limits.max_orders_per_second, 5);
+    }
+    assert_eq!(book(&recovered).await.asks, vec![(dec!(105), dec!(8))]);
+    assert!(
+        recovered
+            .cancel_owned(resting_id, SYM, Side::Sell, &guest.client_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
 }

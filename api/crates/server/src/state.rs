@@ -21,6 +21,9 @@ pub struct AppState {
     pub pool: Option<sqlx::PgPool>,
     /// None while replaying at startup, so replayed entries aren't written twice.
     pub wal: Mutex<Option<WriteAheadLog>>,
+    /// client_id → display name for participants registered at runtime (guests).
+    /// Rebuilt from `ParticipantRegistered` WAL entries on replay.
+    pub display_names: DashMap<String, String>,
 }
 
 impl AppState {
@@ -47,6 +50,7 @@ impl AppState {
             bus,
             pool,
             wal: Mutex::new(None),
+            display_names: DashMap::new(),
         }
     }
 }

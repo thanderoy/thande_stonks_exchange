@@ -58,6 +58,14 @@ path = "tests/market_data/lib.rs"
 name = "server_exchange"
 path = "tests/server/exchange.rs"
 
+[[test]]
+name = "server_http"
+path = "tests/server/http.rs"
+
+[[test]]
+name = "server_config"
+path = "tests/server/config.rs"
+
 [dev-dependencies]
 server = { path = "crates/server" }
 common = { path = "crates/common" }
@@ -71,3 +79,8 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 chrono = "0.4"
+actix-web = "4"
+actix-http = "3"
+serde_json = "1"
+base64 = "0.22"
+hex = "0.4"

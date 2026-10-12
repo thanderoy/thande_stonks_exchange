@@ -71,28 +71,52 @@ cd api
 # Build the backend
 cargo build --workspace --release
 
-# Start with default symbol (AAPL) on 127.0.0.1:8080
+# Start with default symbol (AAPL): public listener on 127.0.0.1:8080,
+# admin listener on 127.0.0.1:9090
 cargo run -p server
 
-# Multiple symbols on a custom address
-SYMBOLS=AAPL,MSFT,GOOGL API_BIND_ADDR=0.0.0.0:9000 cargo run -p server
+# Multiple symbols on custom addresses
+SYMBOLS=AAPL,MSFT,GOOGL API_BIND_ADDR=0.0.0.0:9000 ADMIN_BIND_ADDR=127.0.0.1:9091 cargo run -p server
+
+# Plain-HTTP local testing of guest sessions (cookies are Secure by default)
+COOKIE_SECURE=false cargo run -p server
 
 # With Postgres persistence (optional)
 DATABASE_URL=postgres://user:pass@localhost/exchange cargo run -p server
 ```
 
-Run the terminal monitor from `cli/`, in a second terminal, against a running server:
+One server process runs two listeners over the same exchange state:
+
+- **Public** (`API_BIND_ADDR`, default `127.0.0.1:8080`) — what a reverse proxy exposes to the
+  internet. Visitors join as guests and trade as themselves; it has no session control and no
+  Swagger, and is rate limited per client IP.
+- **Admin** (`ADMIN_BIND_ADDR`, default `127.0.0.1:9090`) — the full API: session
+  open/halt/resume, Swagger UI, and orders that name any `client_id` in the body. It has no
+  authentication, so never expose it publicly.
+
+Run the terminal monitor from `cli/`, in a second terminal, against a running server. It talks
+to the admin listener:
 
 ```bash
 cd cli
 cargo run
 ```
 
-Every order, cancel and session change is appended to a write-ahead log before it is applied.
-On startup the server replays the log, so resting orders, participant positions and session
-states survive a restart or crash. Delete the WAL file to start from an empty exchange.
+On a remote host where the admin port is only bound to localhost, tunnel it first and run the
+monitor locally:
 
-The monitor reads `EXCHANGE_URL` (default `http://127.0.0.1:8080`) and `SYMBOLS`. Press `o` to
+```bash
+ssh -L 9090:127.0.0.1:9090 <host>
+# in another terminal
+cd cli && cargo run    # EXCHANGE_URL defaults to http://127.0.0.1:9090
+```
+
+Every order, cancel, session change and guest registration is appended to a write-ahead log
+before it is applied. On startup the server replays the log, so resting orders, participant
+positions, session states and guest accounts survive a restart or crash. Delete the WAL file to
+start from an empty exchange.
+
+The monitor reads `EXCHANGE_URL` (default `http://127.0.0.1:9090`, the admin listener) and `SYMBOLS`. Press `o` to
 open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random orders,
 `a` to toggle continuous order flow, `H`/`r` to halt/resume, and `q` to quit.
 
@@ -100,7 +124,11 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `API_BIND_ADDR` | `127.0.0.1:8080` | Server bind address |
+| `API_BIND_ADDR` | `127.0.0.1:8080` | Public listener bind address (guest API) |
+| `ADMIN_BIND_ADDR` | `127.0.0.1:9090` | Admin listener bind address (full API, Swagger); keep it private |
+| `SESSION_KEY` | _(random per start)_ | Key for the guest session cookie: hex or base64, at least 64 bytes (e.g. `openssl rand -hex 64`). If unset, a random key is generated and sessions don't survive a restart |
+| `COOKIE_SECURE` | `true` | Set to `false` to drop the cookie's `Secure` flag for plain-HTTP local testing |
+| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated CIDRs of reverse proxies whose rightmost `X-Forwarded-For` address is used as the client IP for rate limiting; otherwise the TCP peer is used |
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
 | `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker) |
@@ -121,7 +149,7 @@ Start both the exchange and Postgres:
 docker compose up --build
 ```
 
-The API is available on port 8080 (configurable via `API_BIND_ADDR` in `.env`). The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
+The public API (port 8080) is only reachable on the internal Docker network, for a reverse proxy in front of it; the admin API is published on `127.0.0.1:9090` on the host. The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
 
 The write-ahead log is kept in the `waldata` volume. Stop and remove volumes (this wipes both the trade ledger and the order book):
 
@@ -131,14 +159,69 @@ docker compose down -v
 
 ## API documentation
 
-Interactive Swagger UI is served at [`http://localhost:8080/swagger-ui/`](http://localhost:8080/swagger-ui/) when the server is running. The raw OpenAPI 3.0 spec is at `/api-docs/openapi.json`.
+Interactive Swagger UI is served on the admin listener at [`http://localhost:9090/swagger-ui/`](http://localhost:9090/swagger-ui/) when the server is running. The raw OpenAPI 3.0 spec is at `/api-docs/openapi.json`.
 
 ## REST API
 
-### Submit an order
+| Route | Public (`:8080`) | Admin (`:9090`) |
+| ----- | ---------------- | --------------- |
+| `GET /healthz` | yes | yes |
+| `POST /v1/join`, `GET /v1/me` | yes | no |
+| `POST /v1/orders` | as the session's guest | as the body's `client_id` |
+| `DELETE /v1/orders/{id}` | own orders only | any order |
+| `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}`, `GET /v1/stream` | yes | yes |
+| `POST /v1/session/{symbol}/open`, `/halt`, `/resume` | no | yes |
+| Swagger UI, `/api-docs/openapi.json` | no | yes |
+
+Errors are JSON: `{"error": "..."}`.
+
+### Join as a guest (public listener)
 
 ```bash
-curl -X POST http://localhost:8080/v1/orders \
+# Creates a guest and keeps the session cookie in a jar. Display names are 2-24 characters:
+# letters, digits, spaces, '_' and '-'. Joining again with a valid session returns the same guest.
+curl -c jar -b jar -X POST http://localhost:8080/v1/join \
+  -H 'Content-Type: application/json' \
+  -d '{"display_name": "Ada"}'
+# {"client_id":"g-k3x9q0ab12","display_name":"Ada"}
+
+# Who am I? 401 without a session.
+curl -b jar http://localhost:8080/v1/me
+```
+
+The session lives in the `tse_session` cookie (HttpOnly, SameSite=Lax, `Secure` unless
+`COOKIE_SECURE=false`, 24 h). Guests get a 100,000 notional-per-order limit, a 10,000 position
+limit and 5 orders per second. Guest accounts are written to the WAL, so they survive restarts;
+sessions do too as long as `SESSION_KEY` stays the same. With the default `COOKIE_SECURE`, curl
+over plain `http://` won't send the cookie back — run the server with `COOKIE_SECURE=false` to
+try this locally.
+
+The public listener also limits requests per client IP (20/s with bursts of 60 overall, and 5
+joins per minute), answering `429 Too Many Requests` when exceeded. Behind a reverse proxy, set
+`TRUSTED_PROXY_CIDRS` to the proxy's network so the rightmost `X-Forwarded-For` address is used
+instead of the proxy's own.
+
+### Submit an order
+
+On the public listener the order is placed as the session's guest (`401` without a session) and
+any `client_id` in the body is ignored:
+
+```bash
+curl -b jar -X POST http://localhost:8080/v1/orders \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "symbol": "AAPL",
+    "side": "Buy",
+    "order_type": { "type": "Limit", "price": "100.00" },
+    "quantity": "10",
+    "time_in_force": "GoodTillCanceled"
+  }'
+```
+
+On the admin listener the body names the participant:
+
+```bash
+curl -X POST http://localhost:9090/v1/orders \
   -H 'Content-Type: application/json' \
   -d '{
     "symbol": "AAPL",
@@ -159,13 +242,22 @@ Response:
 }
 ```
 
+Exceeding a participant's orders-per-second limit returns `429`.
+
 ### Cancel an order
 
 ```bash
-curl -X DELETE "http://localhost:8080/v1/orders/<order_id>?symbol=AAPL&side=Buy"
+# Public: only your own orders; anyone else's returns 404, like a missing order
+curl -b jar -X DELETE "http://localhost:8080/v1/orders/<order_id>?symbol=AAPL&side=Buy"
+
+# Admin: any order
+curl -X DELETE "http://localhost:9090/v1/orders/<order_id>?symbol=AAPL&side=Buy"
 ```
 
-### Session management
+### Session management (admin listener)
+
+On a remote host, reach the admin listener through an SSH tunnel:
+`ssh -L 9090:127.0.0.1:9090 <host>`.
 
 Each symbol starts in **PreMarket**. Before the open, only GTC or Day limit orders are accepted,
 and they rest without matching. `open` runs an opening auction: crossing orders execute at the
@@ -174,27 +266,27 @@ single price that maximises matched volume, then continuous matching begins. Whi
 always accepted.
 
 ```bash
-# Get session state
-curl http://localhost:8080/v1/session/AAPL
+# Get session state (also on the public listener)
+curl http://localhost:9090/v1/session/AAPL
 
 # Open trading
-curl -X POST http://localhost:8080/v1/session/AAPL/open
+curl -X POST http://localhost:9090/v1/session/AAPL/open
 
 # Halt trading
-curl -X POST http://localhost:8080/v1/session/AAPL/halt \
+curl -X POST http://localhost:9090/v1/session/AAPL/halt \
   -H 'Content-Type: application/json' \
   -d '{"reason": "circuit_breaker", "threshold_pct": "10"}'
 
 # Resume trading
-curl -X POST http://localhost:8080/v1/session/AAPL/resume
+curl -X POST http://localhost:9090/v1/session/AAPL/resume
 
-# Health check
-curl http://localhost:8080/healthz
+# Health check (either listener)
+curl http://localhost:9090/healthz
 ```
 
 ### Pre-registered clients
 
-The server registers `demo`, `trader1`, and `trader2` at startup with permissive limits (10 M notional, 1 M max position). Use one of these as `client_id` in order requests. Positions are updated from fills, so the position limit applies to what a client actually holds.
+The server registers `demo`, `trader1`, and `trader2` at startup with permissive limits (10 M notional, 1 M max position, 100,000 orders per second). Use one of these as `client_id` in admin order requests. Positions are updated from fills, so the position limit applies to what a client actually holds.
 
 Every symbol has a reference price of 100 and a 20% price collar: limit prices outside 80–120 are rejected.
 
@@ -219,7 +311,7 @@ Example events:
 Run these from `api/`:
 
 ```bash
-cargo test --workspace          # 89 tests
+cargo test --workspace          # 121 tests
 cargo test --test engine_matcher # single test binary
 cargo bench                     # matching engine benchmarks
 cargo clippy --workspace        # lint

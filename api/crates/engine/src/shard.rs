@@ -1,4 +1,4 @@
-use crate::matcher::{Trade, add_to_book, cancel_order, match_order, uncross};
+use crate::matcher::{Trade, add_to_book, cancel_order, find_order, match_order, uncross};
 use crate::order::{Order, Side};
 use crate::orderbook::OrderBook;
 use common::{OrderId, Symbol};
@@ -19,6 +19,8 @@ pub enum EngineCommand {
     /// Run the opening auction over whatever rested pre-open.
     Uncross(mpsc::Sender<Vec<Trade>>),
     Cancel(OrderId, Side, mpsc::Sender<Option<Order>>),
+    /// Client id of a resting order, or None if it is not on the book. Read-only.
+    OrderOwner(OrderId, Side, mpsc::Sender<Option<String>>),
     GetBook(mpsc::Sender<BookSnapshot>),
 }
 
@@ -45,6 +47,10 @@ pub fn start_shard(symbol: Symbol) -> mpsc::Sender<EngineCommand> {
                 EngineCommand::Cancel(id, side, reply) => {
                     let removed = cancel_order(&mut book, id, side);
                     let _ = reply.send(removed).await;
+                }
+                EngineCommand::OrderOwner(id, side, reply) => {
+                    let owner = find_order(&book, id, side).map(|o| o.client_id.clone());
+                    let _ = reply.send(owner).await;
                 }
                 EngineCommand::GetBook(reply) => {
                     let bids: Vec<(Decimal, Decimal)> = book

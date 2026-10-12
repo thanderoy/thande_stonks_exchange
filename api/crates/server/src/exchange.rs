@@ -15,8 +15,10 @@ use engine::shard::EngineCommand;
 use market_data::MarketEvent;
 use persistence::wal::WalEntry;
 use risk::RiskError;
+use rust_decimal::Decimal;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{Mutex, mpsc};
 
 #[derive(Debug)]
@@ -34,6 +36,7 @@ impl ExchangeError {
         match self {
             Self::UnknownSymbol(_) => StatusCode::NOT_FOUND,
             Self::NotAcceptingOrders(..) => StatusCode::CONFLICT,
+            Self::Risk(RiskError::RateLimitExceeded(_)) => StatusCode::TOO_MANY_REQUESTS,
             Self::PreOpenRequiresRestingLimit | Self::Risk(_) => StatusCode::BAD_REQUEST,
             Self::Wal(_) | Self::ShardUnavailable => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -73,6 +76,13 @@ pub fn state_name(state: &SessionState) -> &'static str {
         SessionState::PostMarket => "PostMarket",
         SessionState::Closed => "Closed",
     }
+}
+
+/// A participant created at runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Participant {
+    pub client_id: String,
+    pub display_name: String,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -142,7 +152,7 @@ impl AppState {
         self.risk
             .lock()
             .unwrap()
-            .check(&order)
+            .check_live(&order, Instant::now())
             .map_err(ExchangeError::Risk)?;
         self.log(&WalEntry::OrderSubmitted {
             order: order.clone(),
@@ -166,6 +176,80 @@ impl AppState {
             timestamp: Utc::now().to_rfc3339(),
         })?;
         self.apply_cancel(order_id, symbol, side).await
+    }
+
+    /// Like [`cancel`](Self::cancel), but only if the resting order belongs to `owner`.
+    /// Someone else's order looks exactly like a missing one: `Ok(None)`, nothing logged.
+    /// The ownership check and the cancel run under one session lock, so the order can't
+    /// change hands in between, and only authorised cancels reach the WAL.
+    pub async fn cancel_owned(
+        &self,
+        order_id: OrderId,
+        symbol: &str,
+        side: Side,
+        owner: &str,
+    ) -> Result<Option<Order>, ExchangeError> {
+        let session = self.session(symbol)?;
+        let _session = session.lock().await;
+        let shard = self.shard(symbol)?;
+        let resting_owner = request(&shard, |tx| {
+            EngineCommand::OrderOwner(order_id, side.clone(), tx)
+        })
+        .await?;
+        if resting_owner.as_deref() != Some(owner) {
+            return Ok(None);
+        }
+        self.log(&WalEntry::OrderCancelled {
+            order_id: order_id.0,
+            symbol: symbol.to_string(),
+            side: side.clone(),
+            timestamp: Utc::now().to_rfc3339(),
+        })?;
+        self.apply_cancel(order_id, symbol, side).await
+    }
+
+    /// Creates a participant with a fresh `g-…` id and the given limits: WAL, then apply.
+    pub fn register_participant(
+        &self,
+        display_name: String,
+        max_notional_per_order: Decimal,
+        max_position: Decimal,
+        max_orders_per_second: u32,
+    ) -> Result<Participant, ExchangeError> {
+        let client_id = loop {
+            let id = crate::guest::new_client_id();
+            if !self
+                .risk
+                .lock()
+                .unwrap()
+                .participant_limits
+                .contains_key(&id)
+            {
+                break id;
+            }
+        };
+        self.log(&WalEntry::ParticipantRegistered {
+            client_id: client_id.clone(),
+            display_name: display_name.clone(),
+            max_notional_per_order,
+            max_position,
+            max_orders_per_second,
+        })?;
+        Ok(self.apply_register(
+            client_id,
+            display_name,
+            max_notional_per_order,
+            max_position,
+            max_orders_per_second,
+        ))
+    }
+
+    /// Display name of a runtime-registered participant.
+    pub fn participant(&self, client_id: &str) -> Option<Participant> {
+        self.display_names.get(client_id).map(|name| Participant {
+            client_id: client_id.to_string(),
+            display_name: name.clone(),
+        })
     }
 
     /// Applies a session transition. Entering Open runs the opening auction, whose trades are returned.
@@ -194,11 +278,30 @@ impl AppState {
     pub async fn replay(&self, entries: Vec<WalEntry>) -> Result<ReplayStats, ExchangeError> {
         let mut stats = ReplayStats::default();
         for entry in entries {
+            if let WalEntry::ParticipantRegistered {
+                client_id,
+                display_name,
+                max_notional_per_order,
+                max_position,
+                max_orders_per_second,
+            } = entry
+            {
+                self.apply_register(
+                    client_id,
+                    display_name,
+                    max_notional_per_order,
+                    max_position,
+                    max_orders_per_second,
+                );
+                stats.applied += 1;
+                continue;
+            }
             let symbol = match &entry {
                 WalEntry::OrderSubmitted { order } => order.symbol.as_str().to_string(),
                 WalEntry::OrderCancelled { symbol, .. }
                 | WalEntry::SessionStateChanged { symbol, .. } => symbol.clone(),
                 WalEntry::TradeExecuted { .. } => continue,
+                WalEntry::ParticipantRegistered { .. } => unreachable!(),
             };
             let Ok(session) = self.session(&symbol) else {
                 stats.skipped += 1;
@@ -220,11 +323,36 @@ impl AppState {
                 WalEntry::SessionStateChanged { symbol, state } => {
                     self.apply_session(&symbol, &mut session, state).await?;
                 }
-                WalEntry::TradeExecuted { .. } => unreachable!(),
+                WalEntry::TradeExecuted { .. } | WalEntry::ParticipantRegistered { .. } => {
+                    unreachable!()
+                }
             }
             stats.applied += 1;
         }
         Ok(stats)
+    }
+
+    /// Registers the participant with the risk engine and records its display name.
+    fn apply_register(
+        &self,
+        client_id: String,
+        display_name: String,
+        max_notional_per_order: Decimal,
+        max_position: Decimal,
+        max_orders_per_second: u32,
+    ) -> Participant {
+        self.risk.lock().unwrap().register_participant(
+            client_id.clone(),
+            max_notional_per_order,
+            max_position,
+            max_orders_per_second,
+        );
+        self.display_names
+            .insert(client_id.clone(), display_name.clone());
+        Participant {
+            client_id,
+            display_name,
+        }
     }
 
     async fn apply_submit(

@@ -21,7 +21,7 @@ use std::{
 #[tokio::main]
 async fn main() {
     let base_url =
-        std::env::var("EXCHANGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+        std::env::var("EXCHANGE_URL").unwrap_or_else(|_| "http://127.0.0.1:9090".to_string());
     let symbols_env = std::env::var("SYMBOLS").unwrap_or_else(|_| "AAPL".to_string());
     let symbols: Vec<String> = symbols_env
         .split(',')

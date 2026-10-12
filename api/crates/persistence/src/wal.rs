@@ -1,5 +1,6 @@
 use engine::order::{Order, Side};
 use engine::session::SessionState;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -33,6 +34,15 @@ pub enum WalEntry {
     SessionStateChanged {
         symbol: String,
         state: SessionState,
+    },
+    /// A participant created at runtime (a guest joining). Replay re-registers it with
+    /// these limits, so its later orders pass the participant lookup again.
+    ParticipantRegistered {
+        client_id: String,
+        display_name: String,
+        max_notional_per_order: Decimal,
+        max_position: Decimal,
+        max_orders_per_second: u32,
     },
 }
 

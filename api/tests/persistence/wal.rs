@@ -124,6 +124,7 @@ fn all_entry_variants_roundtrip() {
             symbol: "X".to_string(),
             state: SessionState::Closed,
         },
+        participant_registered(),
     ];
     {
         let mut wal = WriteAheadLog::open(tmp_path(&tmp)).unwrap();
@@ -132,6 +133,35 @@ fn all_entry_variants_roundtrip() {
         }
     }
     assert_eq!(WriteAheadLog::replay(tmp_path(&tmp)).unwrap(), variants);
+}
+
+fn participant_registered() -> WalEntry {
+    WalEntry::ParticipantRegistered {
+        client_id: "g-abc123xyz0".to_string(),
+        display_name: "Test Guest".to_string(),
+        max_notional_per_order: dec!(100000.50),
+        max_position: dec!(10000),
+        max_orders_per_second: 5,
+    }
+}
+
+#[test]
+fn participant_registered_roundtrips_with_exact_decimals() {
+    let tmp = NamedTempFile::new().unwrap();
+    let entry = participant_registered();
+    WriteAheadLog::open(tmp_path(&tmp))
+        .unwrap()
+        .append(&entry)
+        .unwrap();
+    let replayed = WriteAheadLog::replay(tmp_path(&tmp)).unwrap();
+    assert_eq!(replayed, vec![entry]);
+    match &replayed[0] {
+        WalEntry::ParticipantRegistered {
+            max_notional_per_order,
+            ..
+        } => assert_eq!(max_notional_per_order.to_string(), "100000.50"),
+        other => panic!("unexpected entry {other:?}"),
+    }
 }
 
 /// Simulates a crash mid-append: a length prefix promising more bytes than were written.

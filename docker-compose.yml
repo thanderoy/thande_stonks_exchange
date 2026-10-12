@@ -1,10 +1,18 @@
 services:
   api:
     build: ./api
+    # The public listener (8080) is only reachable on the compose network, by the reverse
+    # proxy. The admin listener is published on the host's loopback only (SSH tunnel).
+    expose:
+      - "8080"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:9090:9090"
     environment:
       API_BIND_ADDR: "${API_BIND_ADDR}"
+      ADMIN_BIND_ADDR: "0.0.0.0:9090"
+      SESSION_KEY: "${SESSION_KEY}"
+      COOKIE_SECURE: "${COOKIE_SECURE}"
+      TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS}"
       SYMBOLS: "${SYMBOLS}"
       DATABASE_URL: "${DATABASE_URL}"
       RUST_LOG: "${RUST_LOG}"
