@@ -1,5 +1,5 @@
 # ── Stage 1: dependency cache (cargo-chef) ───────────────────────────────────
-FROM rust:1.86-slim AS chef
+FROM rust:1.99-slim AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
