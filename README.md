@@ -128,7 +128,7 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 | `ADMIN_BIND_ADDR` | `127.0.0.1:9090` | Admin listener bind address (full API, Swagger); keep it private |
 | `SESSION_KEY` | _(random per start)_ | Key for the guest session cookie: hex or base64, at least 64 bytes (e.g. `openssl rand -hex 64`). If unset, a random key is generated and sessions don't survive a restart |
 | `COOKIE_SECURE` | `true` | Set to `false` to drop the cookie's `Secure` flag for plain-HTTP local testing |
-| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated CIDRs of reverse proxies whose rightmost `X-Forwarded-For` address is used as the client IP for rate limiting; otherwise the TCP peer is used |
+| `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated CIDRs of trusted reverse proxies. When the TCP peer is one, the client IP for rate limiting is the rightmost `X-Forwarded-For` address that isn't itself a trusted proxy; otherwise the TCP peer is used |
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
 | `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker) |
@@ -198,8 +198,10 @@ try this locally.
 
 The public listener also limits requests per client IP (20/s with bursts of 60 overall, and 5
 joins per minute), answering `429 Too Many Requests` when exceeded. Behind a reverse proxy, set
-`TRUSTED_PROXY_CIDRS` to the proxy's network so the rightmost `X-Forwarded-For` address is used
-instead of the proxy's own.
+`TRUSTED_PROXY_CIDRS` to the networks of every proxy in front of the API (for example the Docker
+network that both the host's reverse proxy and the web container use). The API then walks
+`X-Forwarded-For` from the right, skips those proxies, and rate-limits on the first address that
+isn't one of them.
 
 ### Submit an order
 

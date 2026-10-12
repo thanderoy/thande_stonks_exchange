@@ -48,6 +48,39 @@ fn trusted_peer_uses_rightmost_address_of_the_last_header() {
 }
 
 #[test]
+fn chained_trusted_proxies_are_skipped_to_reach_the_client() {
+    // visitor → host reverse proxy (172.18.0.1) → web container (peer 172.18.0.5) → API
+    assert_eq!(
+        resolve("172.18.0.5", &["203.0.113.7, 172.18.0.1"], "172.16.0.0/12"),
+        Some(ip("203.0.113.7"))
+    );
+}
+
+#[test]
+fn spoofed_addresses_left_of_the_client_are_ignored() {
+    assert_eq!(
+        resolve(
+            "172.18.0.5",
+            &["6.6.6.6, 203.0.113.7, 172.18.0.1"],
+            "172.16.0.0/12"
+        ),
+        Some(ip("203.0.113.7"))
+    );
+}
+
+#[test]
+fn all_trusted_chain_uses_the_leftmost_address() {
+    assert_eq!(
+        resolve(
+            "172.18.0.5",
+            &["10.0.0.9, 172.18.0.1"],
+            "172.16.0.0/12, 10.0.0.0/8"
+        ),
+        Some(ip("10.0.0.9"))
+    );
+}
+
+#[test]
 fn trusted_peer_without_usable_forwarded_for_falls_back_to_peer() {
     assert_eq!(
         resolve("172.18.0.5", &[], "172.16.0.0/12"),

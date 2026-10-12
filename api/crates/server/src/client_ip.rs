@@ -1,9 +1,10 @@
 //! Client IP for per-IP rate limiting on the public listener.
 //!
 //! The client is the TCP peer, unless the peer is a trusted reverse proxy (listed in
-//! `TRUSTED_PROXY_CIDRS`), in which case it is the rightmost `X-Forwarded-For` address —
-//! the one the proxy itself appended. Addresses further left are client-supplied and
-//! never trusted.
+//! `TRUSTED_PROXY_CIDRS`). Then `X-Forwarded-For` is read from the right, skipping
+//! addresses that are themselves trusted proxies, and the first untrusted address is the
+//! client. That handles a chain of proxies (host proxy → web container → API). Addresses
+//! left of it were supplied by the client and are never used.
 
 use actix_governor::governor::NotUntil;
 use actix_governor::governor::clock::{Clock, DefaultClock, QuantaInstant};
@@ -31,22 +32,33 @@ pub fn parse_trusted_proxies(raw: &str) -> Result<Vec<IpNet>, String> {
 }
 
 /// Resolves the client address. `forwarded_for` is every `X-Forwarded-For` header value
-/// in order; only the rightmost address of the last one is used, and only when `peer`
-/// is trusted. Falls back to the peer if that address is missing or unparsable.
+/// in order. When `peer` is trusted, addresses are walked from the rightmost one leftwards,
+/// skipping trusted proxies; the first untrusted address is returned. If every address is
+/// trusted, the leftmost one is used. Falls back to the peer when the header is missing or
+/// an address in the walk can't be parsed.
 pub fn client_ip<'a>(
     peer: Option<IpAddr>,
     forwarded_for: impl DoubleEndedIterator<Item = &'a str>,
     trusted: &[IpNet],
 ) -> Option<IpAddr> {
     let peer = peer?;
-    if !trusted.iter().any(|net| net.contains(&peer)) {
+    let is_trusted = |ip: &IpAddr| trusted.iter().any(|net| net.contains(ip));
+    if !is_trusted(&peer) {
         return Some(peer);
     }
-    let forwarded = forwarded_for
-        .rev()
-        .find_map(|value| value.rsplit(',').map(str::trim).find(|s| !s.is_empty()))
-        .and_then(|s| s.parse::<IpAddr>().ok());
-    Some(forwarded.unwrap_or(peer))
+    let mut last_trusted = None;
+    for value in forwarded_for.rev() {
+        for raw in value.rsplit(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let Ok(ip) = raw.parse::<IpAddr>() else {
+                return Some(last_trusted.unwrap_or(peer));
+            };
+            if !is_trusted(&ip) {
+                return Some(ip);
+            }
+            last_trusted = Some(ip);
+        }
+    }
+    Some(last_trusted.unwrap_or(peer))
 }
 
 fn header_values(headers: &HeaderMap) -> Vec<&str> {
