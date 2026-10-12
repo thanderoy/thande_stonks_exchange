@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "name": "Thande Stonks Exchange",
+  "short_name": "TSE",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EEF2F5",
+  "theme_color": "#08718A",
+  "description": "A simulated stock exchange with a live order book, trade tape and order entry."
+}
