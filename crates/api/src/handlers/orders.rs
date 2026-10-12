@@ -3,12 +3,10 @@ use actix_web::{HttpResponse, web};
 use common::{OrderId, Symbol};
 use engine::matcher::Trade;
 use engine::order::{Order, OrderType, Side, TimeInForce};
-use engine::shard::EngineCommand;
 use market_data::MarketEvent;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Deserialize, ToSchema)]
@@ -54,9 +52,10 @@ pub struct CancelQuery {
     path = "/v1/orders",
     request_body = SubmitOrderRequest,
     responses(
-        (status = 200, description = "Order accepted; any immediate fills are in `trades`", body = SubmitOrderResponse),
-        (status = 400, description = "Risk check failed or malformed request", body = ErrorResponse),
+        (status = 200, description = "Order accepted; any immediate fills are in `trades` (always empty before the open, when orders only rest)", body = SubmitOrderResponse),
+        (status = 400, description = "Risk check failed, malformed request, or a non-resting order before the open", body = ErrorResponse),
         (status = 404, description = "Symbol not registered", body = ErrorResponse),
+        (status = 409, description = "Session is Halted, PostMarket or Closed", body = ErrorResponse),
         (status = 500, description = "Internal engine error", body = ErrorResponse),
     ),
     tag = "orders"
@@ -110,42 +109,16 @@ pub async fn submit_order(
 
     let order_id = order.id;
 
-    if let Err(e) = data.risk.check(&order) {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: e.to_string(),
-        });
-    }
-
-    let shard = match data.shards.get(&body.symbol) {
-        Some(s) => s.clone(),
-        None => {
-            return HttpResponse::NotFound().json(ErrorResponse {
-                error: format!("symbol {} not found", body.symbol),
+    let trades = match data.submit(order).await {
+        Ok(trades) => trades,
+        Err(e) => {
+            return HttpResponse::build(e.status()).json(ErrorResponse {
+                error: e.to_string(),
             });
         }
     };
 
-    let (reply_tx, mut reply_rx) = mpsc::channel::<Vec<Trade>>(1);
-    if shard
-        .send(EngineCommand::Submit(order, reply_tx))
-        .await
-        .is_err()
-    {
-        return HttpResponse::InternalServerError().json(ErrorResponse {
-            error: "shard unavailable".into(),
-        });
-    }
-
-    let trades = reply_rx.recv().await.unwrap_or_default();
-
-    for trade in &trades {
-        data.bus.publish(MarketEvent::Trade(trade.clone()));
-
-        if let Some(pool) = &data.pool {
-            let _ = persistence::ledger::persist_trade(pool, trade).await;
-        }
-    }
-
+    data.emit_trades(&trades).await;
     data.bus
         .publish(MarketEvent::OrderAccepted { order_id, symbol });
 
@@ -184,31 +157,16 @@ pub async fn cancel_order(
     let order_id = OrderId(uuid);
     let symbol_str = query.symbol.clone();
 
-    let shard = match data.shards.get(&symbol_str) {
-        Some(s) => s.clone(),
-        None => {
-            return HttpResponse::NotFound().json(ErrorResponse {
-                error: format!("symbol {} not found", symbol_str),
+    let removed = match data.cancel(order_id, &symbol_str, query.side.clone()).await {
+        Ok(removed) => removed,
+        Err(e) => {
+            return HttpResponse::build(e.status()).json(ErrorResponse {
+                error: e.to_string(),
             });
         }
     };
 
-    let (reply_tx, mut reply_rx) = mpsc::channel::<Option<Order>>(1);
-    if shard
-        .send(EngineCommand::Cancel(
-            order_id,
-            query.side.clone(),
-            reply_tx,
-        ))
-        .await
-        .is_err()
-    {
-        return HttpResponse::InternalServerError().json(ErrorResponse {
-            error: "shard unavailable".into(),
-        });
-    }
-
-    match reply_rx.recv().await.flatten() {
+    match removed {
         Some(_) => {
             data.bus.publish(MarketEvent::OrderCancelled {
                 order_id,

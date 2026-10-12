@@ -55,7 +55,12 @@ path = "tests/persistence/wal.rs"
 name = "market_data"
 path = "tests/market_data/lib.rs"
 
+[[test]]
+name = "api_exchange"
+path = "tests/api/exchange.rs"
+
 [dev-dependencies]
+api = { path = "crates/api" }
 common = { path = "crates/common" }
 engine = { path = "crates/engine" }
 risk = { path = "crates/risk" }

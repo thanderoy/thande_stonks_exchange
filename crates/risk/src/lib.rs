@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 
 use common::Symbol;
+use engine::matcher::Trade;
 use engine::order::{Order, OrderType, Side};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -50,6 +51,21 @@ impl RiskEngine {
         self.check_notional_limit(order)?;
         self.check_position_limits(order)?;
         Ok(())
+    }
+
+    /// Applies a fill to both counterparties' positions so later position checks see it.
+    pub fn record_trade(&mut self, trade: &Trade) {
+        self.adjust_position(&trade.buyer_client_id, &trade.symbol, trade.quantity);
+        self.adjust_position(&trade.seller_client_id, &trade.symbol, -trade.quantity);
+    }
+
+    fn adjust_position(&mut self, client_id: &str, symbol: &Symbol, delta: Decimal) {
+        if let Some(limits) = self.participant_limits.get_mut(client_id) {
+            *limits
+                .current_position
+                .entry(symbol.clone())
+                .or_insert(Decimal::ZERO) += delta;
+        }
     }
 
     fn check_symbol_active(&self, order: &Order) -> Result<(), RiskError> {

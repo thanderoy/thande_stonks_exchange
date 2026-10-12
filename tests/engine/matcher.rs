@@ -1,5 +1,5 @@
 use common::{OrderId, Symbol};
-use engine::matcher::{add_to_book, cancel_order, match_order};
+use engine::matcher::{add_to_book, cancel_order, match_order, uncross};
 use engine::order::{Order, Side, TimeInForce};
 use engine::orderbook::OrderBook;
 use rust_decimal::Decimal;
@@ -221,4 +221,116 @@ fn buyer_and_seller_ids_assigned_correctly() {
     let trades = match_order(&mut b, incoming);
     assert_eq!(trades[0].buyer_order_id, incoming_id);
     assert_eq!(trades[0].seller_order_id, resting_id);
+}
+
+#[test]
+fn trades_carry_both_client_ids() {
+    let mut b = book();
+    add_to_book(&mut b, ask(dec!(100), dec!(10)));
+    let trades = match_order(&mut b, bid(dec!(100), dec!(5)));
+    assert_eq!(trades[0].buyer_client_id, "buyer");
+    assert_eq!(trades[0].seller_client_id, "seller");
+}
+
+// --- fill-or-kill ---
+
+fn fok_bid(price: Decimal, qty: Decimal) -> Order {
+    Order::new_limit(
+        sym(),
+        Side::Buy,
+        price,
+        qty,
+        TimeInForce::FillOrKill,
+        "buyer",
+    )
+}
+
+#[test]
+fn fok_that_cannot_fill_completely_trades_nothing_and_leaves_book_untouched() {
+    let mut b = book();
+    add_to_book(&mut b, ask(dec!(100), dec!(5)));
+    add_to_book(&mut b, ask(dec!(102), dec!(5))); // above the FOK limit, must not count
+    let trades = match_order(&mut b, fok_bid(dec!(101), dec!(8)));
+    assert!(trades.is_empty());
+    assert_eq!(b.asks[&dec!(100)].total_quantity, dec!(5));
+    assert_eq!(b.asks[&dec!(102)].total_quantity, dec!(5));
+    assert!(b.bids.is_empty());
+}
+
+#[test]
+fn fok_that_can_fill_across_levels_fills_completely() {
+    let mut b = book();
+    add_to_book(&mut b, ask(dec!(100), dec!(5)));
+    add_to_book(&mut b, ask(dec!(101), dec!(5)));
+    let trades = match_order(&mut b, fok_bid(dec!(101), dec!(8)));
+    let filled: Decimal = trades.iter().map(|t| t.quantity).sum();
+    assert_eq!(filled, dec!(8));
+    assert_eq!(b.asks[&dec!(101)].total_quantity, dec!(2));
+}
+
+#[test]
+fn fok_sell_checks_bids_from_best_down() {
+    let mut b = book();
+    add_to_book(&mut b, bid(dec!(100), dec!(5)));
+    add_to_book(&mut b, bid(dec!(99), dec!(5)));
+    let fok_ask = Order::new_limit(
+        sym(),
+        Side::Sell,
+        dec!(100),
+        dec!(6),
+        TimeInForce::FillOrKill,
+        "seller",
+    );
+    assert!(match_order(&mut b, fok_ask).is_empty());
+    assert_eq!(b.bids[&dec!(100)].total_quantity, dec!(5));
+}
+
+// --- opening auction (uncross) ---
+
+#[test]
+fn uncross_on_uncrossed_book_is_noop() {
+    let mut b = book();
+    add_to_book(&mut b, bid(dec!(99), dec!(10)));
+    add_to_book(&mut b, ask(dec!(100), dec!(10)));
+    assert!(uncross(&mut b).is_empty());
+    assert_eq!(b.best_bid(), Some(dec!(99)));
+    assert_eq!(b.best_ask(), Some(dec!(100)));
+}
+
+#[test]
+fn uncross_fills_everything_at_one_auction_price_and_leaves_book_uncrossed() {
+    // Same ladder as the compute_auction_price test: max volume 80 at 101.
+    let mut b = book();
+    add_to_book(&mut b, bid(dec!(102), dec!(30)));
+    add_to_book(&mut b, bid(dec!(101), dec!(50)));
+    add_to_book(&mut b, bid(dec!(100), dec!(100)));
+    add_to_book(&mut b, ask(dec!(99), dec!(20)));
+    add_to_book(&mut b, ask(dec!(100), dec!(40)));
+    add_to_book(&mut b, ask(dec!(101), dec!(60)));
+
+    let trades = uncross(&mut b);
+
+    assert!(trades.iter().all(|t| t.price == dec!(101)));
+    let volume: Decimal = trades.iter().map(|t| t.quantity).sum();
+    assert_eq!(volume, dec!(80));
+    assert_eq!(b.best_bid(), Some(dec!(100)));
+    assert_eq!(b.best_ask(), Some(dec!(101)));
+    assert_eq!(b.asks[&dec!(101)].total_quantity, dec!(40));
+    assert!(b.best_bid() < b.best_ask());
+}
+
+#[test]
+fn uncross_respects_time_priority_within_a_level() {
+    let mut b = book();
+    let first = bid(dec!(100), dec!(5));
+    let first_id = first.id;
+    add_to_book(&mut b, first);
+    add_to_book(&mut b, bid(dec!(100), dec!(5)));
+    add_to_book(&mut b, ask(dec!(100), dec!(5)));
+
+    let trades = uncross(&mut b);
+
+    assert_eq!(trades.len(), 1);
+    assert_eq!(trades[0].buyer_order_id, first_id);
+    assert_eq!(b.bids[&dec!(100)].total_quantity, dec!(5));
 }

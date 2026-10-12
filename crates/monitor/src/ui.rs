@@ -285,7 +285,7 @@ fn render_events(f: &mut Frame, area: Rect, state: &MonitorState) {
 fn render_footer(f: &mut Frame, area: Rect, state: &MonitorState) {
     let text = match state.mode {
         InputMode::Normal => {
-            " [a]uto-stream  [+/-]speed  [s]ubmit  [c]ancel  [H]alt  [r]esume  [w]×10  [W]×100  [↑↓]sym  [q]uit"
+            " [a]uto-stream  [+/-]speed  [s]ubmit  [c]ancel  [o]pen  [H]alt  [r]esume  [w]×10  [W]×100  [↑↓]sym  [q]uit"
         }
         InputMode::SubmitForm => " [Tab]next field  [Space]toggle side  [Enter]submit  [Esc]cancel",
         InputMode::CancelInput => " [Tab]next field  [Enter]cancel order  [Esc]back",

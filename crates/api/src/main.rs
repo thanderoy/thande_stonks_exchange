@@ -3,14 +3,12 @@ use api::handlers::{book, health, orders, session, ws};
 use api::openapi::ApiDoc;
 use api::state::AppState;
 use common::Symbol;
-use dashmap::DashMap;
-use engine::session::TradingSession;
-use engine::shard::start_shard;
 use market_data::EventBus;
+use persistence::wal::WriteAheadLog;
 use risk::{ParticipantLimits, RiskEngine, SymbolLimits};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -50,17 +48,6 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let shards = DashMap::new();
-    let sessions: DashMap<String, Arc<Mutex<TradingSession>>> = DashMap::new();
-
-    for sym in &symbols {
-        let symbol = Symbol::new(sym.clone());
-        let tx = start_shard(symbol);
-        shards.insert(sym.clone(), tx);
-        sessions.insert(sym.clone(), Arc::new(Mutex::new(TradingSession::new())));
-        tracing::info!("Shard started for {sym}");
-    }
-
     let mut participant_limits = HashMap::new();
     for name in ["demo", "trader1", "trader2"] {
         participant_limits.insert(
@@ -91,14 +78,20 @@ async fn main() -> std::io::Result<()> {
         symbol_limits,
     };
     let bus = Arc::new(EventBus::new(1024));
+    let state = Arc::new(AppState::new(&symbols, risk, bus, pool));
 
-    let state = Arc::new(AppState {
-        shards,
-        sessions,
-        risk,
-        bus,
-        pool,
-    });
+    let wal_path = std::env::var("WAL_PATH").unwrap_or_else(|_| "exchange.wal".to_string());
+    let (wal, entries) = WriteAheadLog::open_for_recovery(&wal_path)?;
+    let stats = state
+        .replay(entries)
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    tracing::info!(
+        "Replayed {} WAL entries from {wal_path} ({} skipped for unconfigured symbols)",
+        stats.applied,
+        stats.skipped
+    );
+    *state.wal.lock().unwrap() = Some(wal);
 
     let openapi = ApiDoc::openapi();
 

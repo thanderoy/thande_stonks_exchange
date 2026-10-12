@@ -31,7 +31,7 @@ pub enum TimeInForce {
     Day,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct Order {
     pub id: OrderId,
     pub symbol: Symbol,

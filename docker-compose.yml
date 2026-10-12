@@ -8,6 +8,8 @@ services:
       SYMBOLS: "${SYMBOLS}"
       DATABASE_URL: "${DATABASE_URL}"
       RUST_LOG: "${RUST_LOG}"
+    volumes:
+      - waldata:/data
     depends_on:
       db:
         condition: service_healthy
@@ -31,3 +33,4 @@ services:
 
 volumes:
   pgdata:
+  waldata:

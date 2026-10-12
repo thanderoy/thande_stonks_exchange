@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use actix_web::{HttpResponse, web};
-use engine::session::HaltReason;
+use engine::session::{HaltReason, TradingSession};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -40,7 +40,7 @@ pub async fn get_session(path: web::Path<String>, data: web::Data<Arc<AppState>>
     let symbol = path.into_inner();
     match data.sessions.get(&symbol) {
         Some(session) => {
-            let state = session.lock().unwrap().state.clone();
+            let state = session.lock().await.state.clone();
             HttpResponse::Ok().json(SessionStateResponse { symbol, state })
         }
         None => HttpResponse::NotFound().json(ErrorResponse {
@@ -54,23 +54,30 @@ pub async fn get_session(path: web::Path<String>, data: web::Data<Arc<AppState>>
     path = "/v1/session/{symbol}/open",
     params(("symbol" = String, Path, description = "Ticker symbol")),
     responses(
-        (status = 200, description = "Session opened", body = SessionStateResponse),
+        (status = 200, description = "Session opened; resting pre-open orders are uncrossed in an opening auction", body = SessionStateResponse),
         (status = 404, description = "Symbol not found", body = ErrorResponse),
     ),
     tag = "session"
 )]
 pub async fn open_session(path: web::Path<String>, data: web::Data<Arc<AppState>>) -> HttpResponse {
     let symbol = path.into_inner();
-    match data.sessions.get(&symbol) {
-        Some(session) => {
-            session.lock().unwrap().open();
-            HttpResponse::Ok().json(SessionStateResponse {
-                symbol,
-                state: engine::session::SessionState::Open,
-            })
+    transition_response(&data, symbol, |s| s.open()).await
+}
+
+/// Applies a transition, then emits the session event and any opening-auction trades.
+async fn transition_response(
+    data: &AppState,
+    symbol: String,
+    change: impl FnOnce(&mut TradingSession),
+) -> HttpResponse {
+    match data.transition(&symbol, change).await {
+        Ok((state, trades)) => {
+            data.publish_session(&symbol, &state);
+            data.emit_trades(&trades).await;
+            HttpResponse::Ok().json(SessionStateResponse { symbol, state })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse {
-            error: "symbol not found".into(),
+        Err(e) => HttpResponse::build(e.status()).json(ErrorResponse {
+            error: e.to_string(),
         }),
     }
 }
@@ -99,21 +106,7 @@ pub async fn halt_session(
         Some("regulatory") => HaltReason::RegulatoryHalt,
         _ => HaltReason::TechnicalIssue,
     };
-    match data.sessions.get(&symbol) {
-        Some(session) => {
-            let halted_state = engine::session::SessionState::Halted {
-                reason: reason.clone(),
-            };
-            session.lock().unwrap().halt(reason);
-            HttpResponse::Ok().json(SessionStateResponse {
-                symbol,
-                state: halted_state,
-            })
-        }
-        None => HttpResponse::NotFound().json(ErrorResponse {
-            error: "symbol not found".into(),
-        }),
-    }
+    transition_response(&data, symbol, |s| s.halt(reason)).await
 }
 
 #[utoipa::path(
@@ -121,7 +114,7 @@ pub async fn halt_session(
     path = "/v1/session/{symbol}/resume",
     params(("symbol" = String, Path, description = "Ticker symbol")),
     responses(
-        (status = 200, description = "Session resumed (Open)", body = SessionStateResponse),
+        (status = 200, description = "Resulting state (Open if it was Halted, otherwise unchanged)", body = SessionStateResponse),
         (status = 404, description = "Symbol not found", body = ErrorResponse),
     ),
     tag = "session"
@@ -131,16 +124,5 @@ pub async fn resume_session(
     data: web::Data<Arc<AppState>>,
 ) -> HttpResponse {
     let symbol = path.into_inner();
-    match data.sessions.get(&symbol) {
-        Some(session) => {
-            session.lock().unwrap().resume();
-            HttpResponse::Ok().json(SessionStateResponse {
-                symbol,
-                state: engine::session::SessionState::Open,
-            })
-        }
-        None => HttpResponse::NotFound().json(ErrorResponse {
-            error: "symbol not found".into(),
-        }),
-    }
+    transition_response(&data, symbol, |s| s.resume()).await
 }

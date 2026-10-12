@@ -26,6 +26,10 @@ COPY --from=builder /app/target/release/api /usr/local/bin/api
 
 ENV API_BIND_ADDR=0.0.0.0:8080
 ENV SYMBOLS=AAPL
+# Write-ahead log lives on a volume so the order book survives container restarts
+ENV WAL_PATH=/data/exchange.wal
+RUN mkdir -p /data
+VOLUME /data
 
 EXPOSE 8080
 ENTRYPOINT ["api"]

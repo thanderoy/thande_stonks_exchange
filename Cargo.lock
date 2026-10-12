@@ -3200,6 +3200,7 @@ dependencies = [
 name = "thande_stonks_exchange"
 version = "0.1.0"
 dependencies = [
+ "api",
  "chrono",
  "common",
  "engine",

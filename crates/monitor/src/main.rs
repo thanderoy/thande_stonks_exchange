@@ -180,6 +180,22 @@ async fn handle_normal(
             });
         }
 
+        KeyCode::Char('o') => {
+            let (sym, url) = {
+                let s = state.lock().unwrap();
+                (s.selected_symbol().to_string(), s.base_url.clone())
+            };
+            let http = http.clone();
+            let state = state.clone();
+            tokio::spawn(async move {
+                let _ = http
+                    .post(format!("{}/v1/session/{}/open", url, sym))
+                    .send()
+                    .await;
+                state.lock().unwrap().push_log(format!("Sent open for {}", sym));
+            });
+        }
+
         KeyCode::Char('r') => {
             let (sym, url) = {
                 let s = state.lock().unwrap();

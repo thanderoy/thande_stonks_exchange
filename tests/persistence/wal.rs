@@ -1,4 +1,9 @@
+use common::Symbol;
+use engine::order::{Order, Side, TimeInForce};
+use engine::session::SessionState;
 use persistence::wal::{WalEntry, WriteAheadLog};
+use rust_decimal_macros::dec;
+use std::io::Write;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
@@ -8,12 +13,14 @@ fn tmp_path(file: &NamedTempFile) -> &str {
 
 fn order_submitted(symbol: &str) -> WalEntry {
     WalEntry::OrderSubmitted {
-        order_id: Uuid::new_v4(),
-        symbol: symbol.to_string(),
-        side: "buy".to_string(),
-        quantity: "10".to_string(),
-        price: Some("100.00".to_string()),
-        client_id: "client1".to_string(),
+        order: Order::new_limit(
+            Symbol::new(symbol),
+            Side::Buy,
+            dec!(100.00),
+            dec!(10),
+            TimeInForce::GoodTillCanceled,
+            "client1",
+        ),
     }
 }
 
@@ -50,6 +57,8 @@ fn append_and_replay_multiple_entries_in_order() {
         order_submitted("AAPL"),
         WalEntry::OrderCancelled {
             order_id: Uuid::new_v4(),
+            symbol: "AAPL".to_string(),
+            side: Side::Buy,
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         },
         WalEntry::TradeExecuted {
@@ -63,7 +72,7 @@ fn append_and_replay_multiple_entries_in_order() {
         },
         WalEntry::SessionStateChanged {
             symbol: "AAPL".to_string(),
-            state: "open".to_string(),
+            state: SessionState::Open,
         },
     ];
     {
@@ -94,15 +103,12 @@ fn all_entry_variants_roundtrip() {
     let tmp = NamedTempFile::new().unwrap();
     let variants = vec![
         WalEntry::OrderSubmitted {
-            order_id: Uuid::new_v4(),
-            symbol: "X".to_string(),
-            side: "sell".to_string(),
-            quantity: "1".to_string(),
-            price: None,
-            client_id: "c".to_string(),
+            order: Order::new_market(Symbol::new("X"), Side::Sell, dec!(1), "c"),
         },
         WalEntry::OrderCancelled {
             order_id: Uuid::new_v4(),
+            symbol: "X".to_string(),
+            side: Side::Sell,
             timestamp: "t".to_string(),
         },
         WalEntry::TradeExecuted {
@@ -116,7 +122,7 @@ fn all_entry_variants_roundtrip() {
         },
         WalEntry::SessionStateChanged {
             symbol: "X".to_string(),
-            state: "closed".to_string(),
+            state: SessionState::Closed,
         },
     ];
     {
@@ -126,4 +132,55 @@ fn all_entry_variants_roundtrip() {
         }
     }
     assert_eq!(WriteAheadLog::replay(tmp_path(&tmp)).unwrap(), variants);
+}
+
+/// Simulates a crash mid-append: a length prefix promising more bytes than were written.
+fn append_torn_record(path: &str) {
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    file.write_all(&100u32.to_le_bytes()).unwrap();
+    file.write_all(b"{\"type\":").unwrap();
+}
+
+#[test]
+fn replay_ignores_torn_final_record() {
+    let tmp = NamedTempFile::new().unwrap();
+    let entry = order_submitted("AAPL");
+    WriteAheadLog::open(tmp_path(&tmp))
+        .unwrap()
+        .append(&entry)
+        .unwrap();
+    append_torn_record(tmp_path(&tmp));
+
+    assert_eq!(WriteAheadLog::replay(tmp_path(&tmp)).unwrap(), vec![entry]);
+}
+
+#[test]
+fn open_for_recovery_truncates_torn_tail_so_new_appends_replay() {
+    let tmp = NamedTempFile::new().unwrap();
+    let first = order_submitted("AAPL");
+    WriteAheadLog::open(tmp_path(&tmp))
+        .unwrap()
+        .append(&first)
+        .unwrap();
+    append_torn_record(tmp_path(&tmp));
+
+    let second = order_submitted("MSFT");
+    {
+        let (mut wal, recovered) = WriteAheadLog::open_for_recovery(tmp_path(&tmp)).unwrap();
+        assert_eq!(recovered, vec![first.clone()]);
+        wal.append(&second).unwrap();
+    }
+    assert_eq!(
+        WriteAheadLog::replay(tmp_path(&tmp)).unwrap(),
+        vec![first, second]
+    );
+}
+
+#[test]
+fn open_for_recovery_creates_missing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("new.wal");
+    let (_, entries) = WriteAheadLog::open_for_recovery(path.to_str().unwrap()).unwrap();
+    assert!(entries.is_empty());
+    assert!(path.exists());
 }

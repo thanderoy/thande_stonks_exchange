@@ -1,4 +1,4 @@
-use crate::matcher::{Trade, cancel_order, match_order};
+use crate::matcher::{Trade, add_to_book, cancel_order, match_order, uncross};
 use crate::order::{Order, Side};
 use crate::orderbook::OrderBook;
 use common::{OrderId, Symbol};
@@ -14,6 +14,10 @@ pub struct BookSnapshot {
 
 pub enum EngineCommand {
     Submit(Order, mpsc::Sender<Vec<Trade>>),
+    /// Rest an order without matching it (pre-open order collection).
+    Rest(Order, mpsc::Sender<()>),
+    /// Run the opening auction over whatever rested pre-open.
+    Uncross(mpsc::Sender<Vec<Trade>>),
     Cancel(OrderId, Side, mpsc::Sender<Option<Order>>),
     GetBook(mpsc::Sender<BookSnapshot>),
 }
@@ -28,6 +32,14 @@ pub fn start_shard(symbol: Symbol) -> mpsc::Sender<EngineCommand> {
             match cmd {
                 EngineCommand::Submit(order, reply) => {
                     let trades = match_order(&mut book, order);
+                    let _ = reply.send(trades).await;
+                }
+                EngineCommand::Rest(order, reply) => {
+                    add_to_book(&mut book, order);
+                    let _ = reply.send(()).await;
+                }
+                EngineCommand::Uncross(reply) => {
+                    let trades = uncross(&mut book);
                     let _ = reply.send(trades).await;
                 }
                 EngineCommand::Cancel(id, side, reply) => {
