@@ -1,0 +1,13 @@
+node_modules
+dist
+server
+tmp
+.cache
+.rollup.cache
+tsconfig.tsbuildinfo
+csp-script-hashes
+*.log
+.env
+.env.*
+Dockerfile
+.dockerignore

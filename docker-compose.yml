@@ -23,6 +23,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  web:
+    build: ./web
+    # Local access only. In production the host's reverse proxy forwards to
+    # this container; the api service needs no public port.
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:
