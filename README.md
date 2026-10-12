@@ -143,13 +143,13 @@ cp .env.example .env
 # edit .env — set POSTGRES_PASSWORD and any other overrides
 ```
 
-Start both the exchange and Postgres:
+Start the exchange, the web UI and Postgres:
 
 ```bash
 docker compose up --build
 ```
 
-The public API (port 8080) is only reachable on the internal Docker network, for a reverse proxy in front of it; the admin API is published on `127.0.0.1:9090` on the host. The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
+The web UI is published on `127.0.0.1:3000`. The public API (port 8080) is only reachable on the internal Docker network, where the web container proxies to it; the admin API is published on `127.0.0.1:9090` on the host. The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
 
 The write-ahead log is kept in the `waldata` volume. Stop and remove volumes (this wipes both the trade ledger and the order book):
 
@@ -192,7 +192,10 @@ network. Build it on its own with `docker build -t tse-web web/`.
 
 Only the web container is public (`tse.roythan.de`). TLS ends at the host's existing reverse
 proxy, which forwards plain HTTP to the web container on port 80. Caddy trusts `X-Forwarded-For`
-from private ranges, so the API sees real client IPs. Because the UI and `/v1` share one origin,
+from private ranges and passes it on. Set `TRUSTED_PROXY_CIDRS` on the API to the Docker networks of
+both proxies (for example `172.16.0.0/12`) so it rate-limits on the visitor's address; without it,
+every visitor shares the web container's limit. Keep `COOKIE_SECURE` at its default (on) and set a
+fixed `SESSION_KEY` so guest sessions survive restarts. Because the UI and `/v1` share one origin,
 the `tse_session` cookie is first-party and no CORS is needed.
 
 `web/Caddyfile` sets the security headers: a Content-Security-Policy with no third-party sources
