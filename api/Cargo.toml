@@ -5,11 +5,10 @@ edition = "2024"
 
 [workspace]
 members = [
-    "crates/api",
+    "crates/server",
     "crates/common",
     "crates/engine",
     "crates/market_data",
-    "crates/monitor",
     "crates/persistence",
     "crates/risk",
 ]
@@ -56,11 +55,11 @@ name = "market_data"
 path = "tests/market_data/lib.rs"
 
 [[test]]
-name = "api_exchange"
-path = "tests/api/exchange.rs"
+name = "server_exchange"
+path = "tests/server/exchange.rs"
 
 [dev-dependencies]
-api = { path = "crates/api" }
+server = { path = "crates/server" }
 common = { path = "crates/common" }
 engine = { path = "crates/engine" }
 risk = { path = "crates/risk" }

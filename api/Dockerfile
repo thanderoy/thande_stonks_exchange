@@ -14,7 +14,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN cargo build --release -p api
+RUN cargo build --release -p server
 
 # ── Stage 3: runtime ─────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -22,7 +22,7 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/api /usr/local/bin/api
+COPY --from=builder /app/target/release/server /usr/local/bin/server
 
 ENV API_BIND_ADDR=0.0.0.0:8080
 ENV SYMBOLS=AAPL
@@ -32,4 +32,4 @@ RUN mkdir -p /data
 VOLUME /data
 
 EXPOSE 8080
-ENTRYPOINT ["api"]
+ENTRYPOINT ["server"]

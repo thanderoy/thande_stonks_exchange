@@ -1,7 +1,7 @@
 use actix_web::{App, HttpServer, middleware, web};
-use api::handlers::{book, health, orders, session, ws};
-use api::openapi::ApiDoc;
-use api::state::AppState;
+use server::handlers::{book, health, orders, session, ws};
+use server::openapi::ApiDoc;
+use server::state::AppState;
 use common::Symbol;
 use market_data::EventBus;
 use persistence::wal::WriteAheadLog;
@@ -17,7 +17,7 @@ async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("api=info".parse().unwrap()),
+                .add_directive("server=info".parse().unwrap()),
         )
         .init();
 

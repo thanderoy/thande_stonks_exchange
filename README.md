@@ -9,7 +9,7 @@ Client (HTTP/WS)
       │
       ▼
 ┌─────────────┐
-│  api crate  │  REST + WebSocket server (actix-web)
+│   server    │  REST + WebSocket server (actix-web)
 │  :8080      │
 └──────┬──────┘
        │ pre-trade
@@ -42,7 +42,15 @@ Client (HTTP/WS)
 └─────────────┘
 ```
 
-## Crates
+## Repository layout
+
+| Directory | Contents |
+| --------- | -------- |
+| `api/` | Rust backend: a Cargo workspace with the exchange server and its crates, plus integration tests and the Dockerfile |
+| `cli/` | Terminal monitor (`ratatui`), a separate Cargo project that talks to the server over HTTP and WebSocket |
+| `web/` | Web UI (planned) |
+
+Crates in `api/crates/`:
 
 | Crate | Description |
 | ----- | ----------- |
@@ -51,25 +59,33 @@ Client (HTTP/WS)
 | `risk` | Pre-trade risk checks and circuit breaker |
 | `persistence` | WAL (length-prefixed JSON) and Postgres trade ledger |
 | `market_data` | `EventBus` broadcasting `MarketEvent` to WebSocket subscribers |
-| `api` | HTTP REST + WebSocket server; wires all crates together |
+| `server` | HTTP REST + WebSocket server; wires all crates together |
 
 ## Running locally
 
+Run the server from `api/`:
+
 ```bash
-# Build everything
+cd api
+
+# Build the backend
 cargo build --workspace --release
 
 # Start with default symbol (AAPL) on 127.0.0.1:8080
-cargo run -p api
+cargo run -p server
 
 # Multiple symbols on a custom address
-SYMBOLS=AAPL,MSFT,GOOGL API_BIND_ADDR=0.0.0.0:9000 cargo run -p api
+SYMBOLS=AAPL,MSFT,GOOGL API_BIND_ADDR=0.0.0.0:9000 cargo run -p server
 
 # With Postgres persistence (optional)
-DATABASE_URL=postgres://user:pass@localhost/exchange cargo run -p api
+DATABASE_URL=postgres://user:pass@localhost/exchange cargo run -p server
+```
 
-# Terminal monitor (in a second terminal, against a running api)
-cargo run -p monitor
+Run the terminal monitor from `cli/`, in a second terminal, against a running server:
+
+```bash
+cd cli
+cargo run
 ```
 
 Every order, cancel and session change is appended to a write-ahead log before it is applied.
@@ -88,7 +104,7 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
 | `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker) |
-| `RUST_LOG` | _(none)_ | Log filter, e.g. `api=debug` |
+| `RUST_LOG` | _(none)_ | Log filter, e.g. `server=debug` |
 
 ## Running with Docker
 
@@ -200,6 +216,8 @@ Example events:
 
 ## Testing
 
+Run these from `api/`:
+
 ```bash
 cargo test --workspace          # 89 tests
 cargo test --test engine_matcher # single test binary
@@ -212,8 +230,8 @@ cargo fmt --check               # formatting
 
 ```bash
 createdb exchange
-psql exchange -f crates/persistence/migrations/0001_trades.sql
-DATABASE_URL=postgres://localhost/exchange cargo run -p api
+psql exchange -f api/crates/persistence/migrations/0001_trades.sql
+cd api && DATABASE_URL=postgres://localhost/exchange cargo run -p server
 ```
 
 After submitting a crossing buy/sell pair:
