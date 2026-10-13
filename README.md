@@ -236,7 +236,7 @@ docker save tse-api:$TAG tse-web:$TAG | gzip | ssh ganymede 'gunzip | docker loa
 
 # On ganymede, in ~/apps/thande_stonks_exchange (a clone, for the compose file and migrations)
 git pull
-cp .env.prod.example .env.prod   # first time: fill in SESSION_KEY and POSTGRES_PASSWORD
+cp .env.prod.example .env.prod   # first time: fill in SESSION_KEY, POSTGRES_PASSWORD and DATABASE_URL
 sed -i "s/^TSE_TAG=.*/TSE_TAG=$TAG/" .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 

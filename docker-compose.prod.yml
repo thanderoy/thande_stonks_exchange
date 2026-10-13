@@ -15,15 +15,15 @@ services:
     image: tse-api:${TSE_TAG:-latest}
     build: ./api
     restart: unless-stopped
+    # Secrets (SESSION_KEY, DATABASE_URL) come from .env.prod, never from this file.
+    env_file: .env.prod
     environment:
       API_BIND_ADDR: "0.0.0.0:8080"
       ADMIN_BIND_ADDR: "0.0.0.0:9090"
-      SESSION_KEY: "${SESSION_KEY:?set SESSION_KEY in .env.prod (openssl rand -hex 64)}"
       COOKIE_SECURE: "true"
       # Docker's private ranges: Traefik and the web container sit in front of the API.
       TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS:-172.16.0.0/12,192.168.0.0/16}"
       SYMBOLS: "${SYMBOLS:-AAPL,MSFT,GOOGL}"
-      DATABASE_URL: "postgres://tse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}@db/tse"
       WAL_PATH: "/data/exchange.wal"
       BOTS: "true"
       RESET_AT: "${RESET_AT:-04:00}"
@@ -82,9 +82,10 @@ services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    # The database password comes from .env.prod.
+    env_file: .env.prod
     environment:
       POSTGRES_USER: "tse"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}"
       POSTGRES_DB: "tse"
     volumes:
       - ./api/crates/persistence/migrations:/docker-entrypoint-initdb.d:ro
