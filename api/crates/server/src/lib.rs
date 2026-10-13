@@ -1,10 +1,12 @@
 pub mod app;
 pub mod bots;
+pub mod burst;
 pub mod client_ip;
 pub mod exchange;
 pub mod guest;
 pub mod handlers;
 pub mod market;
+pub mod metrics;
 pub mod openapi;
 pub mod reset;
 pub mod sandbox;

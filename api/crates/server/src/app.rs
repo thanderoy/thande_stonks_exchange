@@ -9,7 +9,9 @@
 
 use crate::client_ip::ClientIpExtractor;
 use crate::handlers::orders::ErrorResponse;
-use crate::handlers::{admin, book, guest, health, market, orders, sandbox, session, ws};
+use crate::handlers::{
+    admin, book, engine_view, guest, health, market, orders, sandbox, session, ws,
+};
 use crate::openapi::ApiDoc;
 use actix_governor::governor::middleware::NoOpMiddleware;
 use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
@@ -143,6 +145,15 @@ pub fn configure_public(cfg: &mut web::ServiceConfig, config: &PublicConfig) {
                     .route(web::delete().to(sandbox::delete)),
             )
             .route("/v1/me/sandbox/seed", web::post().to(sandbox::seed))
+            .route(
+                "/v1/me/sandbox/burst",
+                web::post().to(engine_view::burst_sandbox),
+            )
+            .route(
+                "/v1/engine/{symbol}",
+                web::get().to(engine_view::engine_public),
+            )
+            .route("/v1/stats", web::get().to(engine_view::stats))
             .route("/v1/orders", web::post().to(orders::submit_order_public))
             .route(
                 "/v1/orders/{id}",
@@ -201,6 +212,10 @@ pub fn configure_admin(cfg: &mut web::ServiceConfig) {
     .route("/v1/trades/{symbol}", web::get().to(market::trades))
     .route("/v1/leaderboard", web::get().to(market::leaderboard))
     .route("/v1/admin/reset", web::post().to(admin::reset))
+    .route("/v1/admin/burst", web::post().to(engine_view::burst_admin))
+    .route("/v1/engine/{symbol}", web::get().to(engine_view::engine))
+    .route("/v1/stats", web::get().to(engine_view::stats))
+    .route("/metrics", web::get().to(engine_view::prometheus))
     .route("/v1/stream", web::get().to(ws::stream));
 }
 

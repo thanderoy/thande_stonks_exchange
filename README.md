@@ -225,7 +225,11 @@ Interactive Swagger UI is served on the admin listener at [`http://localhost:909
 | ----- | ---------------- | --------------- |
 | `GET /healthz` | yes | yes |
 | `POST /v1/join`, `GET /v1/me`, `GET /v1/me/orders`, `GET /v1/me/account` | yes | no |
-| `GET`/`POST`/`DELETE /v1/me/sandbox`, `POST /v1/me/sandbox/seed` | yes | no |
+| `GET`/`POST`/`DELETE /v1/me/sandbox`, `POST /v1/me/sandbox/seed`, `POST /v1/me/sandbox/burst` | yes | no |
+| `GET /v1/engine/{symbol}` | shared symbols and your sandbox | yes |
+| `GET /v1/stats` | yes | yes |
+| `GET /metrics` (Prometheus) | no | yes |
+| `POST /v1/admin/burst` | no | yes |
 | `POST /v1/orders` | as the session's guest | as the body's `client_id` |
 | `DELETE /v1/orders/{id}` | own orders only | any order |
 | `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}`, `GET /v1/trades/{symbol}` | shared symbols and your sandbox | yes |
@@ -397,6 +401,37 @@ and a market reset removes them all. Sandbox trades move positions but not cash,
 count towards P&L or the leaderboard; otherwise an owner could set their own sandbox's price by
 trading with themselves.
 
+### Engine view, load stats and bursts
+
+```bash
+# Each price level's orders in queue order (front fills first), labelled by participant:
+# display names, bot names or pre-registered ids, never a guest's client id. `you` marks
+# your own orders. ?levels= sets levels per side (default 6, at most 20).
+curl -b jar http://localhost:8080/v1/engine/AAPL
+
+# Totals since start, and the last 60 seconds second by second: orders, rejections,
+# trades and submit latency p50/p99 (microseconds, from the session lock to the shard's reply)
+curl http://localhost:8080/v1/stats
+
+# Fire up to 200 random orders from the load bot at your own open sandbox, at most once
+# every 10 seconds; whatever they leave resting is cancelled afterwards
+curl -b jar -X POST http://localhost:8080/v1/me/sandbox/burst \
+  -H 'Content-Type: application/json' -d '{"count": 200}'
+# {"symbol":"SBX-K3X9Q0","submitted":200,"accepted":200,"rejected":0,"trades":131,
+#  "elapsed_ms":38,"orders_per_sec":5263,"p50_us":160,"p99_us":640,"cancelled":41}
+
+# Admin: up to 5000 at any open symbol, and Prometheus metrics (order, trade and cancel
+# counters; submit and WAL write latency histograms)
+curl -X POST http://localhost:9090/v1/admin/burst -H 'Content-Type: application/json' \
+  -d '{"symbol":"AAPL","count":1000}'
+curl http://localhost:9090/metrics
+```
+
+The stream also carries two public events for the engine view: `order_activity` (what happened to
+each order: `rested`, `filled`, `expired`, `killed` for a fill-or-kill that couldn't fill, or
+`cancelled`, with the participant's label) and `auction` (an opening auction's price, volume and
+trade count). Like everything about a sandbox, a sandbox's events reach only its owner.
+
 ### Market reset
 
 A reset removes every sandbox, empties every book, clears positions, cash, price stats and trade history, puts every
@@ -471,7 +506,7 @@ Example events:
 Run these from `api/`:
 
 ```bash
-cargo test --workspace          # 154 tests
+cargo test --workspace          # 161 tests
 cargo test --test engine_matcher # single test binary
 cargo bench                     # matching engine benchmarks
 cargo clippy --workspace        # lint

@@ -1,4 +1,4 @@
-use crate::handlers::{admin, book, guest, health, market, orders, sandbox, session};
+use crate::handlers::{admin, book, engine_view, guest, health, market, orders, sandbox, session};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -38,6 +38,10 @@ use utoipa::OpenApi;
         sandbox::create,
         sandbox::delete,
         sandbox::seed,
+        engine_view::engine,
+        engine_view::stats,
+        engine_view::burst_sandbox,
+        engine_view::burst_admin,
     ),
     components(
         schemas(
@@ -66,6 +70,14 @@ use utoipa::OpenApi;
             crate::market::SymbolKind,
             crate::sandbox::SandboxResponse,
             crate::sandbox::SeedResponse,
+            engine_view::EngineResponse,
+            engine_view::QueueLevelView,
+            engine_view::QueueOrderView,
+            engine_view::BurstRequest,
+            engine_view::AdminBurstRequest,
+            crate::burst::BurstResult,
+            crate::metrics::StatsResponse,
+            crate::metrics::SecondStats,
             // engine types referenced in request/response bodies
             engine::order::Side,
             engine::order::OrderType,
@@ -88,6 +100,7 @@ use utoipa::OpenApi;
         (name = "book", description = "Order book snapshots"),
         (name = "market", description = "Symbols, recent trades and the leaderboard"),
         (name = "admin", description = "Market operations (admin listener only)"),
+        (name = "engine", description = "Per-order queues, load stats and bursts"),
         (name = "sandbox", description = "The caller's private sandbox symbol (public listener only)"),
     )
 )]
