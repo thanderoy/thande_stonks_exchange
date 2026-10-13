@@ -47,6 +47,7 @@ const KNOWN_EVENTS = new Set([
   "order_cancelled",
   "session_state",
   "book_update",
+  "sandbox_removed",
   "market_reset",
 ]);
 

@@ -2,6 +2,7 @@ import { component$, useContext, useVisibleTask$ } from "@builder.io/qwik";
 import type { DocumentHead } from "@builder.io/qwik-city";
 import { getLeaderboard } from "~/api/client";
 import { Leaderboard } from "~/components/operate/leaderboard";
+import { SandboxPanel } from "~/components/operate/sandbox-panel";
 import { SessionBoard } from "~/components/operate/session-board";
 import { Positions } from "~/components/terminal/positions";
 import { StreamStatus } from "~/components/terminal/stream-status";
@@ -44,12 +45,12 @@ export default component$(() => {
       </div>
       <p class="operate-lede muted">
         The shared market as an operator sees it. Bots keep it trading, open it
-        after each nightly reset and leave it alone while it is halted. Session
-        controls here are read only: opening, halting and resuming the shared
-        symbols is for the operator. Controls for a sandbox symbol of your own
-        come in a later release.
+        after each nightly reset and leave it alone while it is halted. Only the
+        operator can open, halt or resume the shared symbols, so to run a
+        session yourself, use your sandbox below.
       </p>
       <SessionBoard />
+      <SandboxPanel />
       <Leaderboard />
       <Positions />
     </div>

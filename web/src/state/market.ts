@@ -4,14 +4,16 @@ import {
   type Account,
   type BookLevel,
   type LeaderboardEntry,
+  type Sandbox,
   type SessionState,
   type Side,
-  type Ticker,
+  type SymbolKind,
 } from "~/api/types";
 import type { StreamStatus } from "~/api/stream";
 import type { Tick } from "~/lib/format";
 
 export interface SymbolSummary {
+  kind: SymbolKind;
   last: string | null;
   tick: Tick;
   session: SessionState | string | null;
@@ -68,7 +70,11 @@ export interface MyOrder {
 }
 
 export interface MarketState {
-  selected: Ticker;
+  selected: string;
+  /** Symbols to show, in order: the shared ones, then the visitor's sandbox. */
+  order: string[];
+  /** The visitor's sandbox, or null. */
+  sandbox: Sandbox | null;
   symbols: Record<string, SymbolSummary>;
   books: Record<string, BookState>;
   tape: TapeEntry[];
@@ -91,8 +97,9 @@ export interface MarketState {
 export const TAPE_LIMIT = 60;
 export const SERIES_LIMIT = 1000;
 
-export function emptySummary(): SymbolSummary {
+export function emptySummary(kind: SymbolKind = "shared"): SymbolSummary {
   return {
+    kind,
     last: null,
     tick: "flat",
     session: null,
@@ -121,6 +128,8 @@ export function initialMarketState(): MarketState {
   }
   return {
     selected: SYMBOLS[0],
+    order: [...SYMBOLS],
+    sandbox: null,
     symbols,
     books,
     tape: [],

@@ -273,9 +273,14 @@ describe("applyStreamEvent", () => {
   });
 });
 
-function summary(symbol: string, last: string | null): WireSummary {
+function summary(
+  symbol: string,
+  last: string | null,
+  kind: WireSummary["kind"] = "shared",
+): WireSummary {
   return {
     symbol,
+    kind,
     state: "Open",
     open: last,
     last,
@@ -344,6 +349,7 @@ describe("applySnapshot", () => {
         ],
         pnl: "0",
       },
+      sandbox: null,
     };
     applySnapshot(state, snap, "me");
 
@@ -395,5 +401,89 @@ describe("helpers", () => {
     addPoint(points, "garbage", "99");
     addPoint(points, "2026-10-12T10:00:06Z", "abc");
     expect(points).toHaveLength(1);
+  });
+});
+
+describe("sandboxes", () => {
+  const sandbox = {
+    symbol: "SBX-ABCDEF",
+    state: "PreMarket" as const,
+    created_at: "2026-10-13T10:00:00Z",
+    expires_in_secs: 1800,
+  };
+
+  function withSandbox() {
+    const state = initialMarketState();
+    applySnapshot(
+      state,
+      {
+        symbols: [
+          summary("AAPL", "100"),
+          summary("MSFT", null),
+          summary("GOOGL", null),
+          summary("SBX-ABCDEF", null, "sandbox"),
+        ],
+        books: [],
+        trades: {},
+        orders: [],
+        account: null,
+        sandbox,
+      },
+      "me",
+    );
+    return state;
+  }
+
+  it("lists the sandbox after the shared symbols", () => {
+    const state = withSandbox();
+    expect(state.order).toEqual(["AAPL", "MSFT", "GOOGL", "SBX-ABCDEF"]);
+    expect(state.symbols["SBX-ABCDEF"].kind).toBe("sandbox");
+    expect(state.sandbox?.symbol).toBe("SBX-ABCDEF");
+  });
+
+  it("forgets the sandbox when it is removed, and moves off it if selected", () => {
+    const state = withSandbox();
+    state.selected = "SBX-ABCDEF";
+    applyStreamEvent(state, trade("t1", "100", { symbol: "SBX-ABCDEF" }), "me");
+    applyStreamEvent(
+      state,
+      {
+        event: "sandbox_removed",
+        symbol: "SBX-ABCDEF",
+        client_id: "me",
+        reason: "idle",
+      },
+      "me",
+    );
+    expect(state.order).toEqual(["AAPL", "MSFT", "GOOGL"]);
+    expect(state.sandbox).toBeNull();
+    expect(state.selected).toBe("AAPL");
+    expect(state.symbols["SBX-ABCDEF"]).toBeUndefined();
+    expect(state.tape).toEqual([]);
+  });
+
+  it("drops sandboxes on a market reset", () => {
+    const state = withSandbox();
+    applyStreamEvent(state, { event: "market_reset" }, "me");
+    expect(state.order).toEqual(["AAPL", "MSFT", "GOOGL"]);
+    expect(state.sandbox).toBeNull();
+  });
+
+  it("drops a symbol the next snapshot no longer lists", () => {
+    const state = withSandbox();
+    applySnapshot(
+      state,
+      {
+        symbols: [summary("AAPL", "100")],
+        books: [],
+        trades: {},
+        orders: null,
+        account: null,
+        sandbox: null,
+      },
+      "me",
+    );
+    expect(state.order).toEqual(["AAPL"]);
+    expect(state.books["SBX-ABCDEF"]).toBeUndefined();
   });
 });

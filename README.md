@@ -168,8 +168,9 @@ docker compose down -v
 `web/` is the public web demo: a [Qwik City](https://qwik.dev/) site built with the static
 adapter, so production is plain files plus a proxy, with no Node server. Pages: `/` (join with a
 display name), `/trade` (symbol cards, price chart, depth ladder, trade tape, order ticket, your
-open orders and positions), `/operate` (read-only sessions, market stats, leaderboard and your
-positions), and placeholders for `/engine` and `/load`. The app pages share one `/v1/stream`
+open orders and positions), `/operate` (sessions and market stats, your sandbox with its session
+controls and book, the leaderboard and your positions), and placeholders for `/engine` and
+`/load`. Your sandbox also appears as a fourth card on `/trade`. The app pages share one `/v1/stream`
 WebSocket: they load a snapshot from the REST endpoints when it connects (and after a reconnect
 or a `market_reset`), then apply book, trade and order events as they arrive. The chart uses
 [lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0).

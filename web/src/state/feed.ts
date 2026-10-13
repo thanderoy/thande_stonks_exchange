@@ -3,16 +3,19 @@ import {
   getBook,
   getMyAccount,
   getMyOrders,
+  getSandbox,
   getSymbols,
   getTrades,
 } from "~/api/client";
-import { SYMBOLS, type Trade } from "~/api/types";
+import type { Trade } from "~/api/types";
 import type { Snapshot } from "./apply-event";
 
 /**
- * Fetch everything the app pages show, in parallel. The visitor's own orders
- * and account come back null without a guest session; a 401 there is not an
- * error. Any other failure rejects.
+ * Fetch everything the app pages show. The symbol list comes first, since it
+ * includes the visitor's sandbox; then every symbol's book and trades, the
+ * visitor's orders, account and sandbox, in parallel. Without a guest session
+ * those last three come back null; a 401 there is not an error. Any other
+ * failure rejects.
  */
 export async function loadSnapshot(): Promise<Snapshot> {
   const optional = <T>(p: Promise<T>): Promise<T | null> =>
@@ -20,12 +23,14 @@ export async function loadSnapshot(): Promise<Snapshot> {
       if (err instanceof ApiError && err.isUnauthorized) return null;
       throw err;
     });
-  const [symbols, books, trades, orders, account] = await Promise.all([
-    getSymbols(),
-    Promise.all(SYMBOLS.map((s) => getBook(s))),
-    Promise.all(SYMBOLS.map((s) => getTrades(s))),
+  const symbols = await getSymbols();
+  const names = symbols.map((s) => s.symbol);
+  const [books, trades, orders, account, sandbox] = await Promise.all([
+    Promise.all(names.map((s) => getBook(s))),
+    Promise.all(names.map((s) => getTrades(s))),
     optional(getMyOrders()),
     optional(getMyAccount()),
+    optional(getSandbox()),
   ]);
   const bySymbol: Record<string, Trade[]> = {};
   for (const t of trades) bySymbol[t.symbol] = t.trades;
@@ -35,5 +40,6 @@ export async function loadSnapshot(): Promise<Snapshot> {
     trades: bySymbol,
     orders: orders?.orders ?? null,
     account,
+    sandbox,
   };
 }

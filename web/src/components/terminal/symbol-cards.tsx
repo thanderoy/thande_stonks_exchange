@@ -1,11 +1,10 @@
 import { component$, useContext } from "@builder.io/qwik";
-import { SYMBOLS } from "~/api/types";
 import {
-  COMPANY_NAMES,
   formatChange,
   formatPrice,
   sessionLabel,
   sessionTone,
+  symbolName,
 } from "~/lib/format";
 import { MarketContext } from "~/state/market";
 
@@ -14,7 +13,7 @@ export const SymbolCards = component$(() => {
 
   return (
     <div class="cards" role="group" aria-label="Symbols">
-      {SYMBOLS.map((sym) => {
+      {market.order.map((sym) => {
         const s = market.symbols[sym];
         const selected = market.selected === sym;
         return (
@@ -26,7 +25,7 @@ export const SymbolCards = component$(() => {
             onClick$={() => (market.selected = sym)}
           >
             <span class="card-sym">{sym}</span>
-            <span class="card-name">{COMPANY_NAMES[sym]}</span>
+            <span class="card-name">{symbolName(sym, s.kind)}</span>
             {s.last ? (
               <span
                 class={[
