@@ -1,0 +1,57 @@
+# Thande Stonks Exchange web container.
+#
+# Serves the prerendered Qwik site from /srv and forwards /v1/* (REST and the
+# /v1/stream WebSocket) to the api container on the internal Docker network.
+# Plain HTTP on :80: TLS is terminated by the host's reverse proxy.
+#
+# CSP_SCRIPT_HASHES is set by the container command from
+# /etc/caddy/csp-script-hashes, which the image build generates from the
+# inline bootstrap scripts Qwik writes into each page.
+
+{
+	admin off
+	servers {
+		# Trust X-Forwarded-For from the host proxy (and Docker networks) so
+		# the API sees the real client IP for rate limiting.
+		trusted_proxies static private_ranges
+	}
+}
+
+:80 {
+	encode zstd gzip
+
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' {$CSP_SCRIPT_HASHES}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://{hostport} wss://{hostport}; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+
+	handle /v1/* {
+		# WebSocket upgrades are proxied automatically.
+		reverse_proxy api:8080
+	}
+
+	handle {
+		root * /srv
+
+		# Vite and Qwik put content-hashed files under /build and /assets.
+		@hashed path /build/* /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		# HTML, q-data.json and unhashed files must be revalidated each time.
+		@unhashed not path /build/* /assets/*
+		header @unhashed Cache-Control "no-cache"
+
+		try_files {path} {path}/index.html
+		file_server
+	}
+
+	handle_errors 404 {
+		root * /srv
+		rewrite * /404.html
+		file_server
+	}
+}

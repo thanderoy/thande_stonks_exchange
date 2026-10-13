@@ -48,7 +48,7 @@ Client (HTTP/WS)
 | --------- | -------- |
 | `api/` | Rust backend: a Cargo workspace with the exchange server and its crates, plus integration tests and the Dockerfile |
 | `cli/` | Terminal monitor (`ratatui`), a separate Cargo project that talks to the server over HTTP and WebSocket |
-| `web/` | Web UI (planned) |
+| `web/` | Web UI: Qwik City static site, served by Caddy, which also proxies the API (see [Web UI](#web-ui)) |
 
 Crates in `api/crates/`:
 
@@ -143,19 +143,67 @@ cp .env.example .env
 # edit .env — set POSTGRES_PASSWORD and any other overrides
 ```
 
-Start both the exchange and Postgres:
+Start the exchange, the web UI and Postgres:
 
 ```bash
 docker compose up --build
 ```
 
-The public API (port 8080) is only reachable on the internal Docker network, for a reverse proxy in front of it; the admin API is published on `127.0.0.1:9090` on the host. The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
+The web UI is published on `127.0.0.1:3000`. The public API (port 8080) is only reachable on the internal Docker network, where the web container proxies to it; the admin API is published on `127.0.0.1:9090` on the host. The database schema is applied automatically on first boot via `docker-entrypoint-initdb.d`.
 
 The write-ahead log is kept in the `waldata` volume. Stop and remove volumes (this wipes both the trade ledger and the order book):
 
 ```bash
 docker compose down -v
 ```
+
+## Web UI
+
+`web/` is the public web demo: a [Qwik City](https://qwik.dev/) site built with the static
+adapter, so production is plain files plus a proxy, with no Node server. Pages: `/` (join with a
+display name), `/trade` (symbol cards, depth ladder, trade tape, order ticket), and placeholders
+for `/operate`, `/engine` and `/load`. Live data comes from the `/v1/stream` WebSocket; the depth
+ladder polls `GET /v1/book/{symbol}` every second.
+
+Requires Node 22.12 or later. Run from `web/`:
+
+```bash
+cd web
+npm ci
+npm run dev        # http://localhost:5173, proxies /v1 (REST and WebSocket) to 127.0.0.1:8080
+npm test           # vitest unit tests
+npm run typecheck
+npm run lint
+npm run build      # typecheck, lint, then prerender every page into dist/
+npm run preview    # serve a production build locally, with the same /v1 proxy
+```
+
+Start the server first (`cd api && SYMBOLS=AAPL,MSFT,GOOGL cargo run -p server`). Set
+`API_TARGET` to proxy somewhere other than `http://127.0.0.1:8080`.
+
+### Docker
+
+`docker compose up --build` also builds the `web` service and publishes it on
+`http://127.0.0.1:3000`. The image is two stages: Node builds the static site, then Caddy serves it
+from `/srv` and reverse-proxies `/v1/*` (including the WebSocket) to `api:8080` on the compose
+network. Build it on its own with `docker build -t tse-web web/`.
+
+### Deployment model
+
+Only the web container is public (`tse.roythan.de`). TLS ends at the host's existing reverse
+proxy, which forwards plain HTTP to the web container on port 80. Caddy trusts `X-Forwarded-For`
+from private ranges and passes it on. Set `TRUSTED_PROXY_CIDRS` on the API to the Docker networks of
+both proxies (for example `172.16.0.0/12`) so it rate-limits on the visitor's address; without it,
+every visitor shares the web container's limit. Keep `COOKIE_SECURE` at its default (on) and set a
+fixed `SESSION_KEY` so guest sessions survive restarts. Because the UI and `/v1` share one origin,
+the `tse_session` cookie is first-party and no CORS is needed.
+
+`web/Caddyfile` sets the security headers: a Content-Security-Policy with no third-party sources
+(fonts are self-hosted), `frame-ancestors 'none'`, `nosniff` and a referrer policy. Qwik writes a
+few small inline bootstrap scripts into each page; the image build hashes them
+(`web/scripts/csp-hashes.mjs`) so `script-src` does not need `'unsafe-inline'`. Hashed files under
+`/build` and `/assets` are cached for a year; HTML and everything else is revalidated on each
+request.
 
 ## API documentation
 
