@@ -164,3 +164,40 @@ async fn clear_empties_the_book() {
 
     assert!(open_orders(&tx, None).await.is_empty());
 }
+
+#[tokio::test]
+async fn queues_list_orders_in_fifo_order_per_level() {
+    let tx = start_shard(sym());
+    let first = gtc(Side::Buy, dec!(100), "a");
+    let second = gtc(Side::Buy, dec!(100), "b");
+    let third = gtc(Side::Buy, dec!(100), "c");
+    for o in [
+        first.clone(),
+        second.clone(),
+        third.clone(),
+        gtc(Side::Buy, dec!(99), "d"),
+    ] {
+        submit(&tx, o).await;
+    }
+    submit(&tx, gtc(Side::Sell, dec!(101), "e")).await;
+
+    let (reply, mut rx) = mpsc::channel(1);
+    tx.send(EngineCommand::Queues {
+        levels: 1,
+        orders_per_level: 2,
+        reply,
+    })
+    .await
+    .unwrap();
+    let snap = rx.recv().await.unwrap();
+
+    assert_eq!(snap.bids.len(), 1, "only the best level");
+    let best = &snap.bids[0];
+    assert_eq!(
+        (best.price, best.total, best.hidden),
+        (dec!(100), dec!(30), 1)
+    );
+    let ids: Vec<OrderId> = best.orders.iter().map(|o| o.id).collect();
+    assert_eq!(ids, vec![first.id, second.id]);
+    assert_eq!(snap.asks[0].orders[0].client_id, "e");
+}
