@@ -132,6 +132,9 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
 | `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker). A market reset keeps the previous log as `<WAL_PATH>.prev` |
+| `BOTS` | `false` | `true` runs the in-process bots on every symbol (see [Bots](#bots)) |
+| `BOT_INTERVAL_MS` | `2000` | Average time between bot ticks |
+| `BOT_PRE_OPEN_SECS` | `30` | With bots on, how long a symbol stays in pre-market before the bots open it |
 | `RESET_AT` | _(none)_ | Daily market reset time, `HH:MM` in UTC (see [Market reset](#market-reset)). Unset means no daily reset |
 | `RUST_LOG` | _(none)_ | Log filter, e.g. `server=debug` |
 
@@ -379,6 +382,22 @@ curl -X POST http://localhost:9090/v1/admin/reset
 Set `RESET_AT=04:00` to reset every day at 04:00 UTC. Without daily resets the WAL grows for
 ever, and startup replays all of it.
 
+### Bots
+
+With `BOTS=true` two bots trade every symbol through the same submit path as everyone else, so
+their orders pass the risk checks and go to the WAL:
+
+- **Maker bot** (`bot-maker`) keeps four bid and four ask levels, 5 cents apart, around a fair
+  value that random-walks and is pulled back towards the reference price. The ladder only moves
+  once fair value has drifted 10 cents, which keeps the WAL small (about 1.3 KB/s for three
+  symbols, roughly 115 MB a day, so pair bots with `RESET_AT`).
+- **Taker bot** (`bot-taker`) sends an IOC order through the spread on most ticks, so trades print.
+
+A symbol in pre-market gets the maker's ladder plus two crossing taker orders, and after
+`BOT_PRE_OPEN_SECS` the bots open it, so the opening auction runs at startup and after every
+reset. The bots leave halted and closed symbols alone, so a halt through the admin listener stops
+them. Both bots appear on the leaderboard.
+
 ### Pre-registered clients
 
 The server registers `demo`, `trader1`, and `trader2` at startup with permissive limits (10 M notional, 1 M max position, 100,000 orders per second). Use one of these as `client_id` in admin order requests. Positions are updated from fills, so the position limit applies to what a client actually holds.
@@ -420,7 +439,7 @@ Example events:
 Run these from `api/`:
 
 ```bash
-cargo test --workspace          # 121 tests
+cargo test --workspace          # 146 tests
 cargo test --test engine_matcher # single test binary
 cargo bench                     # matching engine benchmarks
 cargo clippy --workspace        # lint

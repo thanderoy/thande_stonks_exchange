@@ -1,4 +1,5 @@
 pub mod app;
+pub mod bots;
 pub mod client_ip;
 pub mod exchange;
 pub mod guest;
