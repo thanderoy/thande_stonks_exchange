@@ -216,6 +216,37 @@ few small inline bootstrap scripts into each page; the image build hashes them
 `/build` and `/assets` are cached for a year; HTML and everything else is revalidated on each
 request.
 
+### Deploying to ganymede
+
+`docker-compose.prod.yml` is the production stack: `api`, `web` and a dedicated `db`
+(Postgres 17, the trade ledger), behind the host's Traefik, which routes `tse.roythan.de` to
+`web` and gets its certificate from Let's Encrypt. Only `web` joins the shared `traefik-public`
+network. The admin listener is published on the host's loopback (`127.0.0.1:19090`), and `api`
+joins the shared `monitoring` network with `prometheus.*` labels so the monitoring stack scrapes
+`/metrics`; every container carries the `logging: promtail` label for Loki.
+
+The images are built on a workstation and copied over, so nothing compiles on the server
+(the Rust build needs more memory than the host should spare next to its other stacks):
+
+```bash
+# On the workstation, from the repo root at the commit to deploy
+TAG=$(git rev-parse --short HEAD)
+docker build -t tse-api:$TAG api && docker build -t tse-web:$TAG web
+docker save tse-api:$TAG tse-web:$TAG | gzip | ssh ganymede 'gunzip | docker load'
+
+# On ganymede, in ~/apps/thande_stonks_exchange (a clone, for the compose file and migrations)
+git pull
+cp .env.prod.example .env.prod   # first time: fill in SESSION_KEY and POSTGRES_PASSWORD
+sed -i "s/^TSE_TAG=.*/TSE_TAG=$TAG/" .env.prod
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# Admin listener (Swagger, /metrics, resets, the TUI monitor) over SSH
+ssh -L 9090:127.0.0.1:19090 ganymede    # then http://localhost:9090/swagger-ui/
+```
+
+The WAL and Postgres data live in the `tse_waldata` and `tse_pgdata` volumes. Bots run and the
+market resets daily at 04:00 UTC; set `RESET_AT` in `.env.prod` to change it.
+
 ## API documentation
 
 Interactive Swagger UI is served on the admin listener at [`http://localhost:9090/swagger-ui/`](http://localhost:9090/swagger-ui/) when the server is running. The raw OpenAPI 3.0 spec is at `/api-docs/openapi.json`.

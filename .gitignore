@@ -4,3 +4,4 @@ target/
 CLAUDE.md
 .env
 *.wal
+.env.prod

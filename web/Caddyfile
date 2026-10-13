@@ -30,8 +30,9 @@
 	}
 
 	handle /v1/* {
-		# WebSocket upgrades are proxied automatically.
-		reverse_proxy api:8080
+		# WebSocket upgrades are proxied automatically. API_UPSTREAM overrides the
+		# default when the API's hostname differs (e.g. on a shared network).
+		reverse_proxy {$API_UPSTREAM:api:8080}
 	}
 
 	handle {

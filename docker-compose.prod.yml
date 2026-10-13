@@ -1,0 +1,114 @@
+# Production stack: tse.roythan.de on ganymede, behind the host's Traefik.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Only `web` joins the shared `traefik-public` network; Traefik terminates TLS and routes
+# tse.roythan.de to it. The API's public listener is reachable only from `web` on this
+# stack's own network. Its admin listener is published on the host's loopback for SSH
+# tunnels (`ssh -L 9090:127.0.0.1:19090 ganymede`) and joins the shared `monitoring`
+# network so the monitoring stack's Alloy can scrape /metrics. Images are built
+# elsewhere and loaded with `docker load` (see the README), so nothing compiles here.
+name: tse
+
+services:
+  api:
+    image: tse-api:${TSE_TAG:-latest}
+    build: ./api
+    restart: unless-stopped
+    environment:
+      API_BIND_ADDR: "0.0.0.0:8080"
+      ADMIN_BIND_ADDR: "0.0.0.0:9090"
+      SESSION_KEY: "${SESSION_KEY:?set SESSION_KEY in .env.prod (openssl rand -hex 64)}"
+      COOKIE_SECURE: "true"
+      # Docker's private ranges: Traefik and the web container sit in front of the API.
+      TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS:-172.16.0.0/12,192.168.0.0/16}"
+      SYMBOLS: "${SYMBOLS:-AAPL,MSFT,GOOGL}"
+      DATABASE_URL: "postgres://tse:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}@db/tse"
+      WAL_PATH: "/data/exchange.wal"
+      BOTS: "true"
+      RESET_AT: "${RESET_AT:-04:00}"
+      SANDBOX_MAX: "${SANDBOX_MAX:-}"
+      SANDBOX_IDLE_MINS: "${SANDBOX_IDLE_MINS:-}"
+      RUST_LOG: "${RUST_LOG:-server=info,actix_web=warn}"
+    ports:
+      - "127.0.0.1:19090:9090"
+    volumes:
+      - waldata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - tse-api
+      monitoring: {}
+    labels:
+      logging: "promtail"
+      stackname: "tse"
+      prometheus.scrape: "true"
+      prometheus.port: "9090"
+      prometheus.path: "/metrics"
+      prometheus.job: "tse-api"
+    logging: &logging
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+
+  web:
+    image: tse-web:${TSE_TAG:-latest}
+    build: ./web
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: "tse-api:8080"
+    depends_on:
+      - api
+    networks:
+      - default
+      - traefik-public
+    labels:
+      logging: "promtail"
+      stackname: "tse"
+      traefik.enable: "true"
+      traefik.docker.network: "traefik-public"
+      traefik.http.routers.tse.entrypoints: "https"
+      traefik.http.routers.tse.rule: "Host(`${TSE_DOMAIN:-tse.roythan.de}`)"
+      traefik.http.routers.tse.tls: "true"
+      traefik.http.routers.tse.tls.certresolver: "le"
+      traefik.http.services.tse.loadbalancer.server.port: "80"
+    logging: *logging
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "tse"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}"
+      POSTGRES_DB: "tse"
+    volumes:
+      - ./api/crates/persistence/migrations:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tse -d tse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+    labels:
+      logging: "promtail"
+      stackname: "tse"
+    logging: *logging
+
+volumes:
+  waldata:
+  pgdata:
+
+networks:
+  default: {}
+  # Shared networks created once on the host.
+  traefik-public:
+    external: true
+  monitoring:
+    external: true
