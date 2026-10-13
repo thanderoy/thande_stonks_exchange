@@ -169,8 +169,9 @@ docker compose down -v
 adapter, so production is plain files plus a proxy, with no Node server. Pages: `/` (join with a
 display name), `/trade` (symbol cards, price chart, depth ladder, trade tape, order ticket, your
 open orders and positions), `/operate` (sessions and market stats, your sandbox with its session
-controls and book, the leaderboard and your positions), and placeholders for `/engine` and
-`/load`. Your sandbox also appears as a fourth card on `/trade`. The app pages share one `/v1/stream`
+controls and book, the leaderboard and your positions), `/engine` (every resting order in its price queue, with
+an engine log and an Explain toggle) and `/load` (orders, trades and latency per second for the
+last minute, and bursts against your sandbox). Your sandbox also appears as a fourth card on `/trade`. The app pages share one `/v1/stream`
 WebSocket: they load a snapshot from the REST endpoints when it connects (and after a reconnect
 or a `market_reset`), then apply book, trade and order events as they arrive. The chart uses
 [lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0).

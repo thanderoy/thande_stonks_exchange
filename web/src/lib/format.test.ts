@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeActivity,
   formatChange,
   formatMoney,
   formatPrice,
@@ -153,5 +154,38 @@ describe("formatMoney and formatSignedQty", () => {
     expect(formatSignedQty("40")).toBe("+40");
     expect(formatSignedQty("-1500")).toBe("−1,500");
     expect(formatSignedQty("0")).toBe("0");
+  });
+});
+
+describe("describeActivity", () => {
+  const order = {
+    kind: "order" as const,
+    participant: "Ada",
+    side: "Buy",
+    price: "100.5",
+    quantity: "100",
+  };
+  it("describes each action in a sentence", () => {
+    expect(describeActivity({ ...order, action: "rested", fills: 0, remaining: "100" })).toBe(
+      "Ada's buy of 100 at 100.50 joined the back of the queue.",
+    );
+    expect(describeActivity({ ...order, action: "rested", fills: 2, remaining: "40" })).toBe(
+      "Ada's buy of 100 at 100.50 filled in 2 trades; 40 rests on the book.",
+    );
+    expect(describeActivity({ ...order, action: "filled", fills: 1, remaining: "0" })).toBe(
+      "Ada's buy of 100 at 100.50 filled in 1 trade.",
+    );
+    expect(describeActivity({ ...order, price: undefined, action: "expired", fills: 0, remaining: "100" })).toBe(
+      "Ada's buy of 100 at market found nothing to match and was dropped.",
+    );
+    expect(describeActivity({ ...order, action: "killed", fills: 0, remaining: "100" })).toContain(
+      "was killed",
+    );
+    expect(describeActivity({ ...order, action: "cancelled", remaining: "60" })).toBe(
+      "Ada cancelled a buy of 60 at 100.50.",
+    );
+    expect(describeActivity({ kind: "auction", price: "100", volume: "270", trades: 4 })).toBe(
+      "Opening auction matched 270 shares in 4 trades at 100.00.",
+    );
   });
 });

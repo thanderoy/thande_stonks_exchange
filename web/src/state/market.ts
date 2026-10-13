@@ -69,6 +69,27 @@ export interface MyOrder {
   confirmed: boolean;
 }
 
+/** One line of the engine log. */
+export interface ActivityEntry {
+  /** Unique within the log. */
+  key: string;
+  symbol: string;
+  at: number;
+  kind: "order" | "auction";
+  /** Present for an order. */
+  orderId?: string;
+  participant?: string;
+  side?: Side;
+  price?: string;
+  quantity?: string;
+  remaining?: string;
+  fills?: number;
+  action?: string;
+  /** Present for an auction. */
+  volume?: string;
+  trades?: number;
+}
+
 export interface MarketState {
   selected: string;
   /** Symbols to show, in order: the shared ones, then the visitor's sandbox. */
@@ -78,6 +99,8 @@ export interface MarketState {
   symbols: Record<string, SymbolSummary>;
   books: Record<string, BookState>;
   tape: TapeEntry[];
+  /** Engine log, newest first. */
+  activity: ActivityEntry[];
   /** Chart points per symbol, oldest first. */
   series: Record<string, PricePoint[]>;
   myOrders: MyOrder[];
@@ -95,6 +118,7 @@ export interface MarketState {
 }
 
 export const TAPE_LIMIT = 60;
+export const ACTIVITY_LIMIT = 80;
 export const SERIES_LIMIT = 1000;
 
 export function emptySummary(kind: SymbolKind = "shared"): SymbolSummary {
@@ -133,6 +157,7 @@ export function initialMarketState(): MarketState {
     symbols,
     books,
     tape: [],
+    activity: [],
     series,
     myOrders: [],
     account: null,

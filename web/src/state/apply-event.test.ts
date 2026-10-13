@@ -487,3 +487,44 @@ describe("sandboxes", () => {
     expect(state.books["SBX-ABCDEF"]).toBeUndefined();
   });
 });
+
+describe("engine log", () => {
+  it("logs order activity and auctions newest first, and clears on reset", () => {
+    const state = initialMarketState();
+    applyStreamEvent(
+      state,
+      {
+        event: "order_activity",
+        order_id: "o1",
+        symbol: "AAPL",
+        participant: "Maker bot",
+        side: "Buy",
+        price: "99.95",
+        quantity: "100",
+        remaining: "100",
+        fills: 0,
+        action: "rested",
+      },
+      "",
+    );
+    applyStreamEvent(
+      state,
+      {
+        event: "auction",
+        symbol: "AAPL",
+        price: "100",
+        volume: "270",
+        trades: 4,
+      },
+      "",
+    );
+    expect(state.activity.map((a) => a.kind)).toEqual(["auction", "order"]);
+    expect(state.activity[1]).toMatchObject({
+      participant: "Maker bot",
+      action: "rested",
+    });
+
+    applyStreamEvent(state, { event: "market_reset" }, "");
+    expect(state.activity).toEqual([]);
+  });
+});

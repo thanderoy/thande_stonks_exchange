@@ -169,6 +169,70 @@ export interface SeedResponse {
   crossed: boolean;
 }
 
+/** One resting order in its price level's queue. */
+export interface QueueOrder {
+  order_id: string;
+  /** Display name, bot name or pre-registered id. */
+  participant: string;
+  remaining: DecimalString;
+  submitted_at: string;
+  you: boolean;
+}
+
+export interface QueueLevel {
+  price: DecimalString;
+  total: DecimalString;
+  /** Front of the queue (fills first) first. */
+  orders: QueueOrder[];
+  /** Orders further back that were left out. */
+  hidden: number;
+}
+
+/** `GET /v1/engine/{symbol}`: the book as the engine holds it. */
+export interface EngineView {
+  symbol: string;
+  state: SessionState;
+  /** Best first. */
+  bids: QueueLevel[];
+  asks: QueueLevel[];
+}
+
+export interface SecondStats {
+  /** Unix seconds. */
+  t: number;
+  orders: number;
+  rejected: number;
+  trades: number;
+  p50_us: number | null;
+  p99_us: number | null;
+}
+
+/** `GET /v1/stats`. */
+export interface Stats {
+  uptime_secs: number;
+  orders: number;
+  rejected: number;
+  trades: number;
+  cancels: number;
+  /** The last 60 seconds, oldest first. */
+  seconds: SecondStats[];
+  p50_us: number | null;
+  p99_us: number | null;
+}
+
+export interface BurstResult {
+  symbol: string;
+  submitted: number;
+  accepted: number;
+  rejected: number;
+  trades: number;
+  elapsed_ms: number;
+  orders_per_sec: number;
+  p50_us: number;
+  p99_us: number;
+  cancelled: number;
+}
+
 export interface LeaderboardEntry {
   rank: number;
   display_name: string;
@@ -224,6 +288,33 @@ export interface BookUpdateEvent {
   asks: BookLevel[];
 }
 
+export type Activity = "rested" | "filled" | "expired" | "killed" | "cancelled";
+
+/** Public: what the engine did with one order. */
+export interface OrderActivityEvent {
+  event: "order_activity";
+  order_id: string;
+  symbol: string;
+  participant: string;
+  side: Side;
+  /** Absent for a market order. */
+  price?: DecimalString;
+  quantity: DecimalString;
+  remaining: DecimalString;
+  /** Trades it took part in on arrival. */
+  fills: number;
+  action: Activity;
+}
+
+/** Public: an opening auction's result. */
+export interface AuctionEvent {
+  event: "auction";
+  symbol: string;
+  price: DecimalString;
+  volume: DecimalString;
+  trades: number;
+}
+
 /** Private: the visitor's sandbox was removed. */
 export interface SandboxRemovedEvent {
   event: "sandbox_removed";
@@ -250,4 +341,6 @@ export type StreamEvent =
   | SessionStateEvent
   | BookUpdateEvent
   | SandboxRemovedEvent
+  | OrderActivityEvent
+  | AuctionEvent
   | MarketResetEvent;

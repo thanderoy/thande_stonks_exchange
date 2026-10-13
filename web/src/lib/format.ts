@@ -253,3 +253,50 @@ export function validateOrderForm(v: OrderFormValues): OrderFormErrors {
   }
   return errors;
 }
+
+/** What `describeActivity` needs from an engine log entry. */
+export interface ActivityLike {
+  kind: "order" | "auction";
+  participant?: string;
+  side?: string;
+  price?: string;
+  quantity?: string;
+  remaining?: string;
+  fills?: number;
+  action?: string;
+  volume?: string;
+  trades?: number;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** One plain sentence for an engine log line. */
+export function describeActivity(a: ActivityLike): string {
+  if (a.kind === "auction") {
+    return `Opening auction matched ${formatQty(a.volume)} shares in ${plural(a.trades ?? 0, "trade")} at ${formatPrice(a.price)}.`;
+  }
+  const who = a.participant ?? "Someone";
+  const side = (a.side ?? "").toLowerCase();
+  const at = a.price ? ` at ${formatPrice(a.price)}` : " at market";
+  const order = `${side} of ${formatQty(a.quantity)}${at}`;
+  const fills = a.fills ?? 0;
+  switch (a.action) {
+    case "rested":
+      return fills > 0
+        ? `${who}'s ${order} filled in ${plural(fills, "trade")}; ${formatQty(a.remaining)} rests on the book.`
+        : `${who}'s ${order} joined the back of the queue.`;
+    case "filled":
+      return `${who}'s ${order} filled in ${plural(fills, "trade")}.`;
+    case "expired":
+      return fills > 0
+        ? `${who}'s ${order} filled in ${plural(fills, "trade")}; the other ${formatQty(a.remaining)} was dropped.`
+        : `${who}'s ${order} found nothing to match and was dropped.`;
+    case "killed":
+      return `${who}'s fill-or-kill ${order} was killed: not enough on the book, so nothing traded.`;
+    case "cancelled":
+      return `${who} cancelled a ${side} of ${formatQty(a.remaining)}${at}.`;
+    default:
+      return `${who}: ${a.action ?? "order"} ${order}.`;
+  }
+}

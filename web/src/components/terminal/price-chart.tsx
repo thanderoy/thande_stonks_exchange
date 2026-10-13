@@ -7,6 +7,7 @@ import {
   type NoSerialize,
 } from "@builder.io/qwik";
 import type { IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
+import { cssVar, localTime, onThemeChange, themeOptions } from "~/lib/chart";
 import { formatPrice } from "~/lib/format";
 import { MarketContext, type PricePoint } from "~/state/market";
 
@@ -17,39 +18,8 @@ interface ChartHandle {
   points: number;
 }
 
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim();
-}
-
-/** Chart colours from the page's theme tokens, so it follows light and dark. */
-function themeOptions() {
-  return {
-    layout: {
-      background: { color: cssVar("--surface") },
-      textColor: cssVar("--muted"),
-      fontFamily: cssVar("--font-num") || "monospace",
-    },
-    grid: {
-      vertLines: { color: cssVar("--line") },
-      horzLines: { color: cssVar("--line") },
-    },
-    rightPriceScale: { borderColor: cssVar("--line") },
-    timeScale: { borderColor: cssVar("--line") },
-  };
-}
-
 const toData = (points: PricePoint[]) =>
   points.map((p) => ({ time: p.time as UTCTimestamp, value: p.price }));
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** Local "HH:MM:SS" for a Unix-seconds time. */
-function localTime(time: number): string {
-  const d = new Date(time * 1000);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
 
 export const PriceChart = component$(() => {
   const market = useContext(MarketContext);
@@ -96,17 +66,10 @@ export const PriceChart = component$(() => {
         priceLineColor: cssVar("--accent"),
       });
     };
-    const observer = new MutationObserver(repaint);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener("change", repaint);
+    const stopWatching = onThemeChange(repaint);
 
     cleanup(() => {
-      observer.disconnect();
-      media.removeEventListener("change", repaint);
+      stopWatching();
       chart.remove();
       handle.value = undefined;
     });
