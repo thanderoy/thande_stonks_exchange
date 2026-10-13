@@ -80,7 +80,7 @@ export const MyOrders = component$(() => {
         </ul>
       )}
       <p class="panel-note" role="status" aria-live="polite">
-        {message.value}
+        {message.value && <span>{message.value}</span>}
       </p>
     </section>
   );

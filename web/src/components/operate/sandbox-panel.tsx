@@ -208,7 +208,7 @@ export const SandboxPanel = component$(() => {
           role="status"
           aria-live="polite"
         >
-          {message.value?.text ?? ""}
+          {message.value && <span>{message.value.text}</span>}
         </p>
       </div>
       {sandbox && <DepthLadder symbol={symbol} />}
