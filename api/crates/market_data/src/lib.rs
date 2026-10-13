@@ -42,6 +42,13 @@ pub enum MarketEvent {
         bids: Vec<(Decimal, Decimal)>,
         asks: Vec<(Decimal, Decimal)>,
     },
+    /// Private to `client_id`: their sandbox symbol was removed.
+    SandboxRemoved {
+        symbol: Symbol,
+        client_id: String,
+        /// `deleted` (by its owner) or `idle`.
+        reason: String,
+    },
     /// The shared market was reset: books, positions and trade history are empty and every
     /// symbol is back in pre-market.
     MarketReset,
@@ -51,10 +58,23 @@ impl MarketEvent {
     /// The participant a private event belongs to; `None` for public events.
     pub fn owner(&self) -> Option<&str> {
         match self {
-            Self::OrderAccepted { client_id, .. } | Self::OrderCancelled { client_id, .. } => {
-                Some(client_id)
-            }
+            Self::OrderAccepted { client_id, .. }
+            | Self::OrderCancelled { client_id, .. }
+            | Self::SandboxRemoved { client_id, .. } => Some(client_id),
             _ => None,
+        }
+    }
+
+    /// The symbol an event is about; `None` for market-wide events.
+    pub fn symbol(&self) -> Option<&str> {
+        match self {
+            Self::Trade(t) => Some(t.symbol.as_str()),
+            Self::OrderAccepted { symbol, .. }
+            | Self::OrderCancelled { symbol, .. }
+            | Self::SessionState { symbol, .. }
+            | Self::BookUpdate { symbol, .. }
+            | Self::SandboxRemoved { symbol, .. } => Some(symbol.as_str()),
+            Self::MarketReset => None,
         }
     }
 }

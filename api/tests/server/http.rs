@@ -704,7 +704,7 @@ async fn market_reset_is_admin_only() {
     let body: Value = test::read_body_json(resp).await;
     assert_eq!(body, json!({ "guests_kept": 0, "guests_removed": 0 }));
     assert_eq!(
-        state.symbol_summaries().await[0].state,
+        state.symbol_summaries(server::sandbox::Viewer::Admin).await[0].state,
         engine::session::SessionState::PreMarket
     );
 }
@@ -720,12 +720,12 @@ async fn stream_sends_order_events_only_to_their_owner() {
         side: Side::Buy,
         remaining: dec!(1),
     };
-    assert!(forwarded(&private, Some("g-ada"), false));
-    assert!(!forwarded(&private, Some("g-bo"), false));
-    assert!(!forwarded(&private, None, false));
+    assert!(forwarded(&private, Some("g-ada"), false, None));
+    assert!(!forwarded(&private, Some("g-bo"), false, None));
+    assert!(!forwarded(&private, None, false, None));
     assert!(
-        forwarded(&private, None, true),
+        forwarded(&private, None, true, None),
         "admin stream sees everything"
     );
-    assert!(forwarded(&MarketEvent::MarketReset, None, false));
+    assert!(forwarded(&MarketEvent::MarketReset, None, false, None));
 }

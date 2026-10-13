@@ -62,10 +62,10 @@ async fn bots_open_the_market_quote_both_sides_and_trade() {
     );
 
     wait_for("the bot to open the session", async || {
-        s.symbol_summaries().await[0].state == SessionState::Open
+        s.symbol_summaries(server::sandbox::Viewer::Admin).await[0].state == SessionState::Open
     })
     .await;
-    wait_for("trades", async || s.symbol_summaries().await[0].trades >= 5).await;
+    wait_for("trades", async || s.symbol_summaries(server::sandbox::Viewer::Admin).await[0].trades >= 5).await;
     wait_for("a two-sided book", async || {
         let book = s.book(SYM).await.unwrap();
         !book.bids.is_empty() && !book.asks.is_empty()
@@ -74,7 +74,7 @@ async fn bots_open_the_market_quote_both_sides_and_trade() {
 
     let book = s.book(SYM).await.unwrap();
     assert!(book.bids[0].0 < book.asks[0].0, "book is uncrossed");
-    let summary = &s.symbol_summaries().await[0];
+    let summary = &s.symbol_summaries(server::sandbox::Viewer::Admin).await[0];
     let last = summary.last.unwrap();
     assert!(last > summary.collar_low && last < summary.collar_high);
 
@@ -112,7 +112,7 @@ async fn bots_leave_a_halted_symbol_alone() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     assert!(matches!(
-        s.symbol_summaries().await[0].state,
+        s.symbol_summaries(server::sandbox::Viewer::Admin).await[0].state,
         SessionState::Halted { .. }
     ));
     assert!(s.open_orders(None).await.is_empty());

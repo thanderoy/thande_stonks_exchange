@@ -1,4 +1,6 @@
+use crate::handlers::guest;
 use crate::state::AppState;
+use actix_session::Session;
 use actix_web::{HttpResponse, web};
 use engine::session::{HaltReason, TradingSession};
 use rust_decimal::Decimal;
@@ -124,4 +126,65 @@ pub async fn resume_session(
 ) -> HttpResponse {
     let symbol = path.into_inner();
     transition_response(&data, symbol, |s| s.resume()).await
+}
+
+/// Public listener: a sandbox's state is visible only to its owner.
+pub async fn get_session_public(
+    path: web::Path<String>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !guest::can_see(&session, &data, &path) {
+        return guest::symbol_not_found(&path);
+    }
+    get_session(path, data).await
+}
+
+/// Public listener: session control only on the caller's own sandbox. Shared symbols and
+/// other guests' sandboxes get 404, as if the route didn't exist for them.
+fn owns(session: &Session, data: &AppState, symbol: &str) -> bool {
+    let Some(me) = guest::current_participant(session, data) else {
+        return false;
+    };
+    data.sandbox_owner(symbol).as_deref() == Some(me.client_id.as_str())
+}
+
+fn not_yours(symbol: &str) -> HttpResponse {
+    HttpResponse::NotFound().json(ErrorResponse {
+        error: format!("{symbol} is not your sandbox"),
+    })
+}
+
+pub async fn open_session_public(
+    path: web::Path<String>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !owns(&session, &data, &path) {
+        return not_yours(&path);
+    }
+    open_session(path, data).await
+}
+
+pub async fn halt_session_public(
+    path: web::Path<String>,
+    body: web::Json<HaltBody>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !owns(&session, &data, &path) {
+        return not_yours(&path);
+    }
+    halt_session(path, body, data).await
+}
+
+pub async fn resume_session_public(
+    path: web::Path<String>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !owns(&session, &data, &path) {
+        return not_yours(&path);
+    }
+    resume_session(path, data).await
 }

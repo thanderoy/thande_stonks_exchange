@@ -34,6 +34,10 @@ pub enum ExchangeError {
     Risk(RiskError),
     Wal(std::io::Error),
     ShardUnavailable,
+    /// Every sandbox slot is taken.
+    SandboxesFull(usize),
+    /// A sandbox action that doesn't fit its current state.
+    SandboxConflict(String),
 }
 
 impl ExchangeError {
@@ -44,6 +48,8 @@ impl ExchangeError {
             Self::Risk(RiskError::RateLimitExceeded(_)) => StatusCode::TOO_MANY_REQUESTS,
             Self::PreOpenRequiresRestingLimit | Self::Risk(_) => StatusCode::BAD_REQUEST,
             Self::Wal(_) | Self::ShardUnavailable => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::SandboxesFull(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::SandboxConflict(_) => StatusCode::CONFLICT,
         }
     }
 }
@@ -68,6 +74,11 @@ impl fmt::Display for ExchangeError {
             Self::Risk(e) => write!(f, "{e}"),
             Self::Wal(e) => write!(f, "write-ahead log failed: {e}"),
             Self::ShardUnavailable => write!(f, "shard unavailable"),
+            Self::SandboxesFull(max) => write!(
+                f,
+                "all {max} sandboxes are in use; try again in a few minutes"
+            ),
+            Self::SandboxConflict(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -127,7 +138,7 @@ impl AppState {
             .ok_or_else(|| ExchangeError::UnknownSymbol(symbol.to_string()))
     }
 
-    fn log(&self, entry: &WalEntry) -> Result<(), ExchangeError> {
+    pub(crate) fn log(&self, entry: &WalEntry) -> Result<(), ExchangeError> {
         match self.wal.lock().unwrap().as_mut() {
             Some(wal) => wal.append(entry).map_err(ExchangeError::Wal),
             None => Ok(()),
@@ -158,6 +169,7 @@ impl AppState {
             order: order.clone(),
         })?;
         let accepted = order.clone();
+        self.touch_sandbox(&symbol);
         let trades = self.apply_submit(order, session.can_match()).await?;
         self.publish_trades(&trades);
         let (remaining, status) = fill_outcome(&accepted, &trades);
@@ -224,6 +236,7 @@ impl AppState {
             side: side.clone(),
             timestamp: Utc::now().to_rfc3339(),
         })?;
+        self.touch_sandbox(symbol);
         let removed = self.apply_cancel(order_id, symbol, side.clone()).await?;
         if let Some(order) = &removed {
             self.bus.publish(MarketEvent::OrderCancelled {
@@ -332,6 +345,7 @@ impl AppState {
             symbol: symbol.to_string(),
             state: next.state.clone(),
         })?;
+        self.touch_sandbox(symbol);
         let trades = self
             .apply_session(symbol, &mut session, next.state.clone())
             .await?;
@@ -344,32 +358,56 @@ impl AppState {
     pub async fn replay(&self, entries: Vec<WalEntry>) -> Result<ReplayStats, ExchangeError> {
         let mut stats = ReplayStats::default();
         for entry in entries {
-            if let WalEntry::ParticipantRegistered {
-                client_id,
-                display_name,
-                max_notional_per_order,
-                max_position,
-                max_orders_per_second,
-                registered_at,
-            } = entry
-            {
-                self.apply_register(
+            let entry = match entry {
+                WalEntry::ParticipantRegistered {
                     client_id,
                     display_name,
                     max_notional_per_order,
                     max_position,
                     max_orders_per_second,
                     registered_at,
-                );
-                stats.applied += 1;
-                continue;
-            }
+                } => {
+                    self.apply_register(
+                        client_id,
+                        display_name,
+                        max_notional_per_order,
+                        max_position,
+                        max_orders_per_second,
+                        registered_at,
+                    );
+                    stats.applied += 1;
+                    continue;
+                }
+                WalEntry::SymbolCreated {
+                    symbol,
+                    owner,
+                    reference_price,
+                    price_collar_pct,
+                    created_at,
+                } => {
+                    self.apply_sandbox_created(
+                        &symbol,
+                        &owner,
+                        reference_price,
+                        price_collar_pct,
+                        created_at,
+                    );
+                    stats.applied += 1;
+                    continue;
+                }
+                WalEntry::SymbolRemoved { symbol } => {
+                    self.apply_sandbox_removed(&symbol);
+                    stats.applied += 1;
+                    continue;
+                }
+                WalEntry::TradeExecuted { .. } => continue,
+                other => other,
+            };
             let symbol = match &entry {
                 WalEntry::OrderSubmitted { order } => order.symbol.as_str().to_string(),
                 WalEntry::OrderCancelled { symbol, .. }
                 | WalEntry::SessionStateChanged { symbol, .. } => symbol.clone(),
-                WalEntry::TradeExecuted { .. } => continue,
-                WalEntry::ParticipantRegistered { .. } => unreachable!(),
+                _ => unreachable!("handled above"),
             };
             let Ok(session) = self.session(&symbol) else {
                 stats.skipped += 1;
@@ -391,9 +429,7 @@ impl AppState {
                 WalEntry::SessionStateChanged { symbol, state } => {
                     self.apply_session(&symbol, &mut session, state).await?;
                 }
-                WalEntry::TradeExecuted { .. } | WalEntry::ParticipantRegistered { .. } => {
-                    unreachable!()
-                }
+                _ => unreachable!("handled above"),
             }
             stats.applied += 1;
         }
@@ -491,9 +527,12 @@ impl AppState {
                 risk.record_trade(trade);
             }
         }
+        // Sandbox trades move positions but not cash, so they never count towards P&L:
+        // an owner can set their sandbox's price by trading with themselves.
+        let shared = !self.is_sandbox(trades[0].symbol.as_str());
         let mut market = self.market.lock().unwrap();
         for trade in trades {
-            market.record_fill(trade);
+            market.record_fill(trade, shared);
         }
     }
 

@@ -100,6 +100,7 @@ fn tag(event: &MarketEvent) -> &'static str {
         MarketEvent::OrderCancelled { .. } => "order_cancelled",
         MarketEvent::SessionState { .. } => "session_state",
         MarketEvent::BookUpdate { .. } => "book_update",
+        MarketEvent::SandboxRemoved { .. } => "sandbox_removed",
         MarketEvent::MarketReset => "market_reset",
     }
 }
@@ -249,7 +250,7 @@ async fn symbol_summaries_report_session_stats_and_collar() {
         s.submit(ioc(Side::Buy, price, qty, "alice")).await.unwrap();
     }
 
-    let summaries = s.symbol_summaries().await;
+    let summaries = s.symbol_summaries(server::sandbox::Viewer::Admin).await;
     assert_eq!(
         summaries
             .iter()
@@ -312,7 +313,7 @@ async fn trade_history_is_newest_first_and_live_only() {
     );
     recovered.replay(entries).await.unwrap();
     assert!(recovered.recent_trades(SYM, 10).unwrap().is_empty());
-    let summary = &recovered.symbol_summaries().await[0];
+    let summary = &recovered.symbol_summaries(server::sandbox::Viewer::Admin).await[0];
     assert_eq!((summary.last, summary.volume), (Some(dec!(101)), dec!(2)));
 }
 
@@ -354,7 +355,7 @@ async fn reset_clears_the_market_and_keeps_recent_guests() {
     assert_eq!((summary.guests_kept, summary.guests_removed), (1, 1));
 
     assert!(live.open_orders(None).await.is_empty());
-    for s in live.symbol_summaries().await {
+    for s in live.symbol_summaries(server::sandbox::Viewer::Admin).await {
         assert_eq!(s.state, SessionState::PreMarket);
         assert_eq!((s.last, s.volume), (None, Decimal::ZERO));
     }

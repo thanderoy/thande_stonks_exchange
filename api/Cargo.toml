@@ -74,6 +74,10 @@ path = "tests/server/market.rs"
 name = "server_bots"
 path = "tests/server/bots.rs"
 
+[[test]]
+name = "server_sandbox"
+path = "tests/server/sandbox.rs"
+
 [dev-dependencies]
 server = { path = "crates/server" }
 common = { path = "crates/common" }

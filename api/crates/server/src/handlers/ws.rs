@@ -13,7 +13,7 @@ pub async fn stream(
     stream: web::Payload,
     data: web::Data<Arc<AppState>>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    serve(req, stream, &data, None, true)
+    serve(req, stream, data.get_ref().clone(), None, true)
 }
 
 /// Public listener: market events for everyone, plus `order_accepted` and
@@ -26,22 +26,29 @@ pub async fn stream_public(
     data: web::Data<Arc<AppState>>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let me = guest::current_participant(&session, &data).map(|p| p.client_id);
-    serve(req, stream, &data, me, false)
+    serve(req, stream, data.get_ref().clone(), me, false)
 }
 
-/// Whether a stream connection for `viewer` gets `event`: public events go to everyone,
-/// private ones only to their owner (or to every connection when `see_all`).
-pub fn forwarded(event: &MarketEvent, viewer: Option<&str>, see_all: bool) -> bool {
-    match event.owner() {
-        None => true,
-        Some(owner) => see_all || viewer == Some(owner),
+/// Whether a stream connection for `viewer` gets `event`. Private events go only to
+/// their owner, and everything about a sandbox only to the sandbox's owner
+/// (`sandbox_owner`, when the event's symbol is one). `see_all` (admin) gets everything.
+pub fn forwarded(
+    event: &MarketEvent,
+    viewer: Option<&str>,
+    see_all: bool,
+    sandbox_owner: Option<&str>,
+) -> bool {
+    if see_all {
+        return true;
     }
+    let private_to = event.owner().or(sandbox_owner);
+    private_to.is_none_or(|owner| viewer == Some(owner))
 }
 
 fn serve(
     req: HttpRequest,
     stream: web::Payload,
-    data: &AppState,
+    data: Arc<AppState>,
     viewer: Option<String>,
     see_all: bool,
 ) -> Result<HttpResponse, actix_web::Error> {
@@ -53,7 +60,8 @@ fn serve(
             tokio::select! {
                 event = rx.recv() => match event {
                     Ok(event) => {
-                        if !forwarded(&event, viewer.as_deref(), see_all) {
+                        let sandbox_owner = event.symbol().and_then(|s| data.sandbox_owner(s));
+                        if !forwarded(&event, viewer.as_deref(), see_all, sandbox_owner.as_deref()) {
                             continue;
                         }
                         let json = serde_json::to_string(&event).unwrap_or_default();

@@ -1,4 +1,6 @@
+use crate::handlers::guest;
 use crate::state::AppState;
+use actix_session::Session;
 use actix_web::{HttpResponse, web};
 use engine::shard::{BookSnapshot, EngineCommand};
 use serde::Serialize;
@@ -26,10 +28,7 @@ pub struct BookResponse {
     ),
     tag = "book"
 )]
-pub async fn get_book(
-    path: web::Path<String>,
-    data: web::Data<Arc<AppState>>,
-) -> HttpResponse {
+pub async fn get_book(path: web::Path<String>, data: web::Data<Arc<AppState>>) -> HttpResponse {
     let symbol_str = path.into_inner();
     let shard = match data.shards.get(&symbol_str) {
         Some(s) => s.clone(),
@@ -59,4 +58,16 @@ pub async fn get_book(
             .map(|(p, q)| [p.to_string(), q.to_string()])
             .collect(),
     })
+}
+
+/// Public listener: a sandbox's book is visible only to its owner.
+pub async fn get_book_public(
+    path: web::Path<String>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !guest::can_see(&session, &data, &path) {
+        return guest::symbol_not_found(&path);
+    }
+    get_book(path, data).await
 }

@@ -4,5 +4,6 @@ pub mod guest;
 pub mod health;
 pub mod market;
 pub mod orders;
+pub mod sandbox;
 pub mod session;
 pub mod ws;

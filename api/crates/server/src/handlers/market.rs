@@ -3,6 +3,7 @@
 use crate::handlers::guest;
 use crate::handlers::orders::ErrorResponse;
 use crate::market::{HISTORY_LIMIT, LeaderboardEntry};
+use crate::sandbox::Viewer;
 use crate::state::AppState;
 use actix_session::Session;
 use actix_web::{HttpResponse, web};
@@ -38,12 +39,32 @@ pub struct LeaderboardResponse {
     get,
     path = "/v1/symbols",
     responses(
-        (status = 200, description = "Every configured symbol with its session state, price stats since the last reset and price collar", body = [SymbolSummary]),
+        (status = 200, description = "Every symbol with its session state, price stats since the last reset and price collar: the shared symbols, then sandboxes (all of them here; on the public listener only the caller's own)", body = [SymbolSummary]),
     ),
     tag = "market"
 )]
 pub async fn symbols(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    HttpResponse::Ok().json(data.symbol_summaries().await)
+    HttpResponse::Ok().json(data.symbol_summaries(Viewer::Admin).await)
+}
+
+/// Public listener: the shared symbols plus the caller's own sandbox.
+pub async fn symbols_public(session: Session, data: web::Data<Arc<AppState>>) -> HttpResponse {
+    let me = guest::current_participant(&session, &data);
+    let viewer = Viewer::Public(me.as_ref().map(|p| p.client_id.as_str()));
+    HttpResponse::Ok().json(data.symbol_summaries(viewer).await)
+}
+
+/// Public listener: a sandbox's trades are visible only to its owner.
+pub async fn trades_public(
+    path: web::Path<String>,
+    query: web::Query<LimitQuery>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    if !guest::can_see(&session, &data, &path) {
+        return guest::symbol_not_found(&path);
+    }
+    trades(path, query, data).await
 }
 
 #[utoipa::path(
