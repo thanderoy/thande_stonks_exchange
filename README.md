@@ -131,7 +131,8 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 | `TRUSTED_PROXY_CIDRS` | _(empty)_ | Comma-separated CIDRs of trusted reverse proxies. When the TCP peer is one, the client IP for rate limiting is the rightmost `X-Forwarded-For` address that isn't itself a trusted proxy; otherwise the TCP peer is used |
 | `SYMBOLS` | `AAPL` | Comma-separated list of tradeable symbols |
 | `DATABASE_URL` | _(none)_ | Postgres URL; omit to run without DB persistence |
-| `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker) |
+| `WAL_PATH` | `exchange.wal` | Write-ahead log file, replayed on startup (`/data/exchange.wal` in Docker). A market reset keeps the previous log as `<WAL_PATH>.prev` |
+| `RESET_AT` | _(none)_ | Daily market reset time, `HH:MM` in UTC (see [Market reset](#market-reset)). Unset means no daily reset |
 | `RUST_LOG` | _(none)_ | Log filter, e.g. `server=debug` |
 
 ## Running with Docker
@@ -214,11 +215,14 @@ Interactive Swagger UI is served on the admin listener at [`http://localhost:909
 | Route | Public (`:8080`) | Admin (`:9090`) |
 | ----- | ---------------- | --------------- |
 | `GET /healthz` | yes | yes |
-| `POST /v1/join`, `GET /v1/me` | yes | no |
+| `POST /v1/join`, `GET /v1/me`, `GET /v1/me/orders`, `GET /v1/me/account` | yes | no |
 | `POST /v1/orders` | as the session's guest | as the body's `client_id` |
 | `DELETE /v1/orders/{id}` | own orders only | any order |
-| `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}`, `GET /v1/stream` | yes | yes |
+| `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}` | yes | yes |
+| `GET /v1/symbols`, `GET /v1/trades/{symbol}`, `GET /v1/leaderboard` | yes | yes |
+| `GET /v1/stream` | market events, plus your own order events | every event |
 | `POST /v1/session/{symbol}/open`, `/halt`, `/resume` | no | yes |
+| `POST /v1/admin/reset` | no | yes |
 | Swagger UI, `/api-docs/openapi.json` | no | yes |
 
 Errors are JSON: `{"error": "..."}`.
@@ -288,10 +292,14 @@ Response:
 ```json
 {
   "order_id": "...",
-  "trades": []
+  "trades": [],
+  "remaining": "10",
+  "status": "resting"
 }
 ```
 
+`remaining` is what the immediate fills in `trades` left, and `status` is `resting` (it's on the
+book), `filled`, or `expired` (a market, IOC or FOK order whose remainder was dropped).
 Exceeding a participant's orders-per-second limit returns `429`.
 
 ### Cancel an order
@@ -334,6 +342,43 @@ curl -X POST http://localhost:9090/v1/session/AAPL/resume
 curl http://localhost:9090/healthz
 ```
 
+### Market data and your account
+
+```bash
+# Every symbol: session state, open/last/high/low, volume and trade count since the last
+# reset, reference price and collar bounds
+curl http://localhost:8080/v1/symbols
+
+# Recent trades, newest first (default 200, at most 500). Kept in memory since the last
+# reset or restart; Postgres, when configured, keeps them all.
+curl "http://localhost:8080/v1/trades/AAPL?limit=50"
+
+# Guests and bots who have traded since the reset, by P&L: cash from fills plus positions
+# marked at the last price. Display names only; on the public listener `you` marks you.
+curl -b jar http://localhost:8080/v1/leaderboard
+
+# Your resting orders (with remaining quantity), and your cash, positions and P&L
+curl -b jar http://localhost:8080/v1/me/orders
+curl -b jar http://localhost:8080/v1/me/account
+```
+
+### Market reset
+
+A reset empties every book, clears positions, cash, price stats and trade history, puts every
+symbol back in pre-market, and starts a fresh WAL, keeping the old one as `<WAL_PATH>.prev`. Guests
+who joined in the last 24 hours (the cookie lifetime) keep their accounts, because the new WAL
+starts by registering them again; older guests are removed and their sessions get `401`. Clients
+receive a `market_reset` event.
+
+```bash
+# Run one now (admin listener)
+curl -X POST http://localhost:9090/v1/admin/reset
+# {"guests_kept":3,"guests_removed":1}
+```
+
+Set `RESET_AT=04:00` to reset every day at 04:00 UTC. Without daily resets the WAL grows for
+ever, and startup replays all of it.
+
 ### Pre-registered clients
 
 The server registers `demo`, `trader1`, and `trader2` at startup with permissive limits (10 M notional, 1 M max position, 100,000 orders per second). Use one of these as `client_id` in admin order requests. Positions are updated from fills, so the position limit applies to what a client actually holds.
@@ -342,7 +387,7 @@ Every symbol has a reference price of 100 and a 20% price collar: limit prices o
 
 ## WebSocket market data stream
 
-Connect to `ws://localhost:8080/v1/stream` to receive all market events as newline-delimited JSON:
+Connect to `ws://localhost:8080/v1/stream` to receive market events as JSON, one per message:
 
 ```bash
 websocat ws://localhost:8080/v1/stream
@@ -351,10 +396,24 @@ websocat ws://localhost:8080/v1/stream
 Example events:
 
 ```json
-{"event":"order_accepted","order_id":"...","symbol":"AAPL"}
-{"event":"trade","id":"...","symbol":"AAPL","price":"100.00","quantity":"100",...}
-{"event":"order_cancelled","order_id":"...","symbol":"AAPL"}
+{"event":"trade","id":"...","symbol":"AAPL","price":"100.00","quantity":"100","buyer_client_id":"...",...}
+{"event":"book_update","symbol":"AAPL","bids":[["99.95","200"]],"asks":[["100.05","150"]]}
+{"event":"session_state","symbol":"AAPL","state":"Open"}
+{"event":"market_reset"}
+{"event":"order_accepted","order_id":"...","symbol":"AAPL","client_id":"g-...","side":"Buy",
+ "order_type":{"type":"Limit","price":"100.00"},"quantity":"10","time_in_force":"GoodTillCanceled",
+ "remaining":"4","status":"resting"}
+{"event":"order_cancelled","order_id":"...","symbol":"AAPL","client_id":"g-...","side":"Buy","remaining":"4"}
 ```
+
+- `book_update` carries the top 10 levels per side after a change. Updates are coalesced to at
+  most one per symbol every 100 ms, so treat each as a full snapshot.
+- `order_accepted` and `order_cancelled` are private. On the public listener a connection gets
+  only its own guest's, decided by the session cookie when it connects; join first, then connect.
+  The admin listener sends everyone's.
+- A symbol's events arrive in the order the engine applied them. An order's `trade` events come
+  before its `order_accepted`, whose `remaining` already counts them, so later trades on that
+  order id are fills against it while it rests.
 
 ## Testing
 

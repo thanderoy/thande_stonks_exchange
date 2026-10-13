@@ -3,5 +3,7 @@ pub mod client_ip;
 pub mod exchange;
 pub mod guest;
 pub mod handlers;
+pub mod market;
 pub mod openapi;
+pub mod reset;
 pub mod state;

@@ -5,9 +5,8 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, web};
 use chrono::Utc;
 use common::{OrderId, Symbol};
-use engine::matcher::Trade;
-use engine::order::{Order, OrderType, Side, TimeInForce};
-use market_data::MarketEvent;
+use engine::matcher::{Trade, fill_outcome};
+use engine::order::{Order, OrderStatus, OrderType, Side, TimeInForce};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -34,6 +33,10 @@ pub struct SubmitOrderResponse {
     pub order_id: OrderId,
     /// Trades generated immediately by this order (may be empty)
     pub trades: Vec<Trade>,
+    /// Quantity not filled by those trades
+    pub remaining: Decimal,
+    /// Whether the remainder is resting on the book, or was dropped (market, IOC, FOK)
+    pub status: OrderStatus,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -130,22 +133,21 @@ fn build_order(body: &SubmitOrderRequest, client_id: String) -> Order {
 
 async fn submit_as(body: &SubmitOrderRequest, client_id: String, data: &AppState) -> HttpResponse {
     let order = build_order(body, client_id);
-    let order_id = order.id;
-    let symbol = order.symbol.clone();
-
-    let trades = match data.submit(order).await {
+    let trades = match data.submit(order.clone()).await {
         Ok(trades) => trades,
         Err(e) => return error(e.status(), e.to_string()),
     };
-
-    data.emit_trades(&trades).await;
-    data.bus
-        .publish(MarketEvent::OrderAccepted { order_id, symbol });
-
-    HttpResponse::Ok().json(SubmitOrderResponse { order_id, trades })
+    data.persist_trades(&trades).await;
+    let (remaining, status) = fill_outcome(&order, &trades);
+    HttpResponse::Ok().json(SubmitOrderResponse {
+        order_id: order.id,
+        trades,
+        remaining,
+        status,
+    })
 }
 
-fn error(status: StatusCode, message: impl Into<String>) -> HttpResponse {
+pub(crate) fn error(status: StatusCode, message: impl Into<String>) -> HttpResponse {
     HttpResponse::build(status).json(ErrorResponse {
         error: message.into(),
     })
@@ -207,15 +209,9 @@ async fn cancel(
         None => data.cancel(order_id, symbol, side).await,
     };
     match result {
-        Ok(Some(_)) => {
-            data.bus.publish(MarketEvent::OrderCancelled {
-                order_id,
-                symbol: Symbol::new(symbol),
-            });
-            HttpResponse::Ok().json(CancelOrderResponse {
-                cancelled: order_id,
-            })
-        }
+        Ok(Some(_)) => HttpResponse::Ok().json(CancelOrderResponse {
+            cancelled: order_id,
+        }),
         Ok(None) => error(StatusCode::NOT_FOUND, "order not found"),
         Err(e) => error(e.status(), e.to_string()),
     }

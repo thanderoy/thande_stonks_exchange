@@ -10,6 +10,7 @@ use server::client_ip::parse_trusted_proxies;
 use server::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -24,6 +25,13 @@ async fn main() -> std::io::Result<()> {
     let admin_bind_addr =
         std::env::var("ADMIN_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:9090".to_string());
     let public_config = public_config_from_env()?;
+    let reset_at = match std::env::var("RESET_AT") {
+        Ok(raw) if !raw.trim().is_empty() => Some(
+            server::reset::parse_reset_at(&raw)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?,
+        ),
+        _ => None,
+    };
     let symbols_env = std::env::var("SYMBOLS").unwrap_or_else(|_| "AAPL".to_string());
     let symbols: Vec<String> = symbols_env
         .split(',')
@@ -92,6 +100,14 @@ async fn main() -> std::io::Result<()> {
         stats.skipped
     );
     *state.wal.lock().unwrap() = Some(wal);
+
+    state.spawn_book_publisher(Duration::from_millis(100));
+    match reset_at {
+        Some(at) => {
+            state.spawn_daily_reset(at, chrono::Duration::hours(app::SESSION_TTL_HOURS));
+        }
+        None => tracing::info!("No daily market reset (set RESET_AT=HH:MM, UTC)"),
+    }
 
     tracing::info!("Public listener on http://{bind_addr}");
     tracing::info!("Admin listener on http://{admin_bind_addr} (Swagger UI at /swagger-ui/)");

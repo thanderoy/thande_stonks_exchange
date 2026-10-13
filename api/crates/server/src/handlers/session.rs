@@ -72,8 +72,7 @@ async fn transition_response(
 ) -> HttpResponse {
     match data.transition(&symbol, change).await {
         Ok((state, trades)) => {
-            data.publish_session(&symbol, &state);
-            data.emit_trades(&trades).await;
+            data.persist_trades(&trades).await;
             HttpResponse::Ok().json(SessionStateResponse { symbol, state })
         }
         Err(e) => HttpResponse::build(e.status()).json(ErrorResponse {
