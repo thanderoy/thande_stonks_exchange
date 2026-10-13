@@ -31,5 +31,6 @@ ENV WAL_PATH=/data/exchange.wal
 RUN mkdir -p /data
 VOLUME /data
 
-EXPOSE 8080
+# 8080: public listener. 9090: admin listener (bind with ADMIN_BIND_ADDR; keep it private).
+EXPOSE 8080 9090
 ENTRYPOINT ["server"]

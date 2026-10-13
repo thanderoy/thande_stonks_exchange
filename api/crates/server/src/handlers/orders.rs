@@ -1,5 +1,9 @@
+use crate::handlers::guest;
 use crate::state::AppState;
+use actix_session::Session;
+use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, web};
+use chrono::Utc;
 use common::{OrderId, Symbol};
 use engine::matcher::Trade;
 use engine::order::{Order, OrderType, Side, TimeInForce};
@@ -18,8 +22,10 @@ pub struct SubmitOrderRequest {
     /// Order quantity (decimal string)
     pub quantity: Decimal,
     pub time_in_force: TimeInForce,
-    /// Pre-registered client identifier
-    pub client_id: String,
+    /// Client to trade as. Required on the admin listener; ignored on the public listener,
+    /// where the identity comes from the `tse_session` cookie set by `POST /v1/join`.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -53,9 +59,11 @@ pub struct CancelQuery {
     request_body = SubmitOrderRequest,
     responses(
         (status = 200, description = "Order accepted; any immediate fills are in `trades` (always empty before the open, when orders only rest)", body = SubmitOrderResponse),
-        (status = 400, description = "Risk check failed, malformed request, or a non-resting order before the open", body = ErrorResponse),
+        (status = 400, description = "Risk check failed, malformed request, missing `client_id` (admin), or a non-resting order before the open", body = ErrorResponse),
+        (status = 401, description = "Public listener: no guest session", body = ErrorResponse),
         (status = 404, description = "Symbol not registered", body = ErrorResponse),
         (status = 409, description = "Session is Halted, PostMarket or Closed", body = ErrorResponse),
+        (status = 429, description = "Participant's orders-per-second limit exceeded (or, on the public listener, the per-IP request limit)", body = ErrorResponse),
         (status = 500, description = "Internal engine error", body = ErrorResponse),
     ),
     tag = "orders"
@@ -64,32 +72,44 @@ pub async fn submit_order(
     body: web::Json<SubmitOrderRequest>,
     data: web::Data<Arc<AppState>>,
 ) -> HttpResponse {
-    let symbol = Symbol::new(&body.symbol);
+    let Some(client_id) = body.client_id.clone() else {
+        return error(StatusCode::BAD_REQUEST, "client_id is required");
+    };
+    submit_as(&body, client_id, &data).await
+}
 
-    let order = match &body.order_type {
-        OrderType::Market => Order::new_market(
-            symbol.clone(),
-            body.side.clone(),
-            body.quantity,
-            &body.client_id,
-        ),
+/// Public listener: trades as the session's guest; any `client_id` in the body is ignored.
+pub async fn submit_order_public(
+    body: web::Json<SubmitOrderRequest>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    let Some(me) = guest::current_participant(&session, &data) else {
+        return guest::unauthorized();
+    };
+    submit_as(&body, me.client_id, &data).await
+}
+
+fn build_order(body: &SubmitOrderRequest, client_id: String) -> Order {
+    let symbol = Symbol::new(&body.symbol);
+    match &body.order_type {
+        OrderType::Market => Order::new_market(symbol, body.side.clone(), body.quantity, client_id),
         OrderType::Limit { price } => Order::new_limit(
-            symbol.clone(),
+            symbol,
             body.side.clone(),
             *price,
             body.quantity,
             body.time_in_force.clone(),
-            &body.client_id,
+            client_id,
         ),
         OrderType::StopLimit {
             stop_price,
             limit_price,
         } => {
-            use chrono::Utc;
             let now = Utc::now();
             Order {
                 id: OrderId::new(),
-                symbol: symbol.clone(),
+                symbol,
                 side: body.side.clone(),
                 order_type: OrderType::StopLimit {
                     stop_price: *stop_price,
@@ -102,20 +122,20 @@ pub async fn submit_order(
                 updated_at: now,
                 submitted_at: now,
                 cancelled_at: None,
-                client_id: body.client_id.clone(),
+                client_id,
             }
         }
-    };
+    }
+}
 
+async fn submit_as(body: &SubmitOrderRequest, client_id: String, data: &AppState) -> HttpResponse {
+    let order = build_order(body, client_id);
     let order_id = order.id;
+    let symbol = order.symbol.clone();
 
     let trades = match data.submit(order).await {
         Ok(trades) => trades,
-        Err(e) => {
-            return HttpResponse::build(e.status()).json(ErrorResponse {
-                error: e.to_string(),
-            });
-        }
+        Err(e) => return error(e.status(), e.to_string()),
     };
 
     data.emit_trades(&trades).await;
@@ -123,6 +143,12 @@ pub async fn submit_order(
         .publish(MarketEvent::OrderAccepted { order_id, symbol });
 
     HttpResponse::Ok().json(SubmitOrderResponse { order_id, trades })
+}
+
+fn error(status: StatusCode, message: impl Into<String>) -> HttpResponse {
+    HttpResponse::build(status).json(ErrorResponse {
+        error: message.into(),
+    })
 }
 
 #[utoipa::path(
@@ -135,7 +161,8 @@ pub async fn submit_order(
     responses(
         (status = 200, description = "Order cancelled", body = CancelOrderResponse),
         (status = 400, description = "Invalid order UUID", body = ErrorResponse),
-        (status = 404, description = "Order or symbol not found", body = ErrorResponse),
+        (status = 401, description = "Public listener: no guest session", body = ErrorResponse),
+        (status = 404, description = "Order or symbol not found (on the public listener, also another participant's order)", body = ErrorResponse),
         (status = 500, description = "Internal engine error", body = ErrorResponse),
     ),
     tag = "orders"
@@ -145,39 +172,51 @@ pub async fn cancel_order(
     query: web::Query<CancelQuery>,
     data: web::Data<Arc<AppState>>,
 ) -> HttpResponse {
-    let order_id_str = path.into_inner();
-    let uuid = match order_id_str.parse::<uuid::Uuid>() {
-        Ok(u) => u,
-        Err(_) => {
-            return HttpResponse::BadRequest().json(ErrorResponse {
-                error: "invalid order id".into(),
-            });
-        }
+    cancel(&path, &query, None, &data).await
+}
+
+/// Public listener: cancels only the session guest's own orders. Anyone else's order
+/// gets the same 404 as an order that doesn't exist.
+pub async fn cancel_order_public(
+    path: web::Path<String>,
+    query: web::Query<CancelQuery>,
+    session: Session,
+    data: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    let Some(me) = guest::current_participant(&session, &data) else {
+        return guest::unauthorized();
+    };
+    cancel(&path, &query, Some(&me.client_id), &data).await
+}
+
+async fn cancel(
+    order_id: &str,
+    query: &CancelQuery,
+    owner: Option<&str>,
+    data: &AppState,
+) -> HttpResponse {
+    let Ok(uuid) = order_id.parse::<uuid::Uuid>() else {
+        return error(StatusCode::BAD_REQUEST, "invalid order id");
     };
     let order_id = OrderId(uuid);
-    let symbol_str = query.symbol.clone();
+    let symbol = query.symbol.as_str();
+    let side = query.side.clone();
 
-    let removed = match data.cancel(order_id, &symbol_str, query.side.clone()).await {
-        Ok(removed) => removed,
-        Err(e) => {
-            return HttpResponse::build(e.status()).json(ErrorResponse {
-                error: e.to_string(),
-            });
-        }
+    let result = match owner {
+        Some(owner) => data.cancel_owned(order_id, symbol, side, owner).await,
+        None => data.cancel(order_id, symbol, side).await,
     };
-
-    match removed {
-        Some(_) => {
+    match result {
+        Ok(Some(_)) => {
             data.bus.publish(MarketEvent::OrderCancelled {
                 order_id,
-                symbol: Symbol::new(&symbol_str),
+                symbol: Symbol::new(symbol),
             });
             HttpResponse::Ok().json(CancelOrderResponse {
                 cancelled: order_id,
             })
         }
-        None => HttpResponse::NotFound().json(ErrorResponse {
-            error: "order not found".into(),
-        }),
+        Ok(None) => error(StatusCode::NOT_FOUND, "order not found"),
+        Err(e) => error(e.status(), e.to_string()),
     }
 }

@@ -233,6 +233,17 @@ pub fn add_to_book(book: &mut OrderBook, order: Order) {
     level.orders.push_back(order);
 }
 
+/// The resting order with this id on the given side, if any.
+pub fn find_order(book: &OrderBook, order_id: OrderId, side: Side) -> Option<&Order> {
+    let levels = match side {
+        Side::Buy => &book.bids,
+        Side::Sell => &book.asks,
+    };
+    levels
+        .values()
+        .find_map(|level| level.orders.iter().find(|o| o.id == order_id))
+}
+
 pub fn cancel_order(book: &mut OrderBook, order_id: OrderId, side: Side) -> Option<Order> {
     let levels = match side {
         Side::Buy => &mut book.bids,

@@ -1,4 +1,4 @@
-use crate::handlers::{book, health, orders, session};
+use crate::handlers::{book, guest, health, orders, session};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -7,11 +7,16 @@ use utoipa::OpenApi;
         title = "Thande Stonks Exchange",
         version = "0.1.0",
         description = "Price-time priority continuous matching engine. \
-            Pre-registered clients: `demo`, `trader1`, `trader2`.",
+            This is the admin listener: orders name their `client_id` in the body \
+            (pre-registered clients: `demo`, `trader1`, `trader2`, plus any joined guest). \
+            The public listener serves `/v1/join`, `/v1/me`, orders as the session's guest, \
+            book, session state (read only) and the stream; it has no session control.",
         contact(name = "Roy Thande"),
     ),
     paths(
         health::healthz,
+        guest::join,
+        guest::me,
         orders::submit_order,
         orders::cancel_order,
         session::get_session,
@@ -24,6 +29,8 @@ use utoipa::OpenApi;
         schemas(
             // api handler types
             health::HealthResponse,
+            guest::JoinRequest,
+            guest::IdentityResponse,
             orders::SubmitOrderRequest,
             orders::SubmitOrderResponse,
             orders::CancelOrderResponse,
@@ -49,6 +56,7 @@ use utoipa::OpenApi;
         (name = "orders", description = "Submit and cancel orders"),
         (name = "session", description = "Trading session lifecycle"),
         (name = "health", description = "Service health"),
+        (name = "guest", description = "Guest identity (public listener only)"),
         (name = "book", description = "Order book snapshots"),
     )
 )]
