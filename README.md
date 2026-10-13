@@ -165,9 +165,12 @@ docker compose down -v
 
 `web/` is the public web demo: a [Qwik City](https://qwik.dev/) site built with the static
 adapter, so production is plain files plus a proxy, with no Node server. Pages: `/` (join with a
-display name), `/trade` (symbol cards, depth ladder, trade tape, order ticket), and placeholders
-for `/operate`, `/engine` and `/load`. Live data comes from the `/v1/stream` WebSocket; the depth
-ladder polls `GET /v1/book/{symbol}` every second.
+display name), `/trade` (symbol cards, price chart, depth ladder, trade tape, order ticket, your
+open orders and positions), `/operate` (read-only sessions, market stats, leaderboard and your
+positions), and placeholders for `/engine` and `/load`. The app pages share one `/v1/stream`
+WebSocket: they load a snapshot from the REST endpoints when it connects (and after a reconnect
+or a `market_reset`), then apply book, trade and order events as they arrive. The chart uses
+[lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0).
 
 Requires Node 22.12 or later. Run from `web/`:
 
@@ -182,7 +185,7 @@ npm run build      # typecheck, lint, then prerender every page into dist/
 npm run preview    # serve a production build locally, with the same /v1 proxy
 ```
 
-Start the server first (`cd api && SYMBOLS=AAPL,MSFT,GOOGL cargo run -p server`). Set
+Start the server first (`cd api && SYMBOLS=AAPL,MSFT,GOOGL BOTS=true COOKIE_SECURE=false cargo run -p server`). Set
 `API_TARGET` to proxy somewhere other than `http://127.0.0.1:8080`.
 
 ### Docker

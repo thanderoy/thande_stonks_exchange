@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatChange,
+  formatMoney,
   formatPrice,
   formatQty,
+  formatSignedQty,
   formatTime,
   sessionLabel,
   sessionTone,
@@ -129,5 +132,26 @@ describe("summarizeOrderResult", () => {
     expect(
       summarizeOrderResult([{ price: "99.5", quantity: "30" }], "100", "Limit", "GoodTillCanceled"),
     ).toBe("Filled 30 of 100 in 1 trade at an average of 99.50. The rest is resting on the book.");
+  });
+});
+
+describe("formatChange", () => {
+  it("shows the signed change and percentage", () => {
+    expect(formatChange("100.45", "100")).toBe("+0.45 (+0.45%)");
+    expect(formatChange("99", "100")).toBe("−1.00 (−1.00%)");
+    expect(formatChange("100", "100")).toBe("0.00 (0.00%)");
+    expect(formatChange("x", "100")).toBe("");
+  });
+});
+
+describe("formatMoney and formatSignedQty", () => {
+  it("signs amounts and share counts", () => {
+    expect(formatMoney(1234.5)).toBe("+1,234.50");
+    expect(formatMoney("-20")).toBe("−20.00");
+    expect(formatMoney(0.001)).toBe("0.00");
+    expect(formatMoney(null)).toBe("");
+    expect(formatSignedQty("40")).toBe("+40");
+    expect(formatSignedQty("-1500")).toBe("−1,500");
+    expect(formatSignedQty("0")).toBe("0");
   });
 });

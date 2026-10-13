@@ -46,6 +46,8 @@ const KNOWN_EVENTS = new Set([
   "order_accepted",
   "order_cancelled",
   "session_state",
+  "book_update",
+  "market_reset",
 ]);
 
 /** Parse one WebSocket message into zero or more events. */

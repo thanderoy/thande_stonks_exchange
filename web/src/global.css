@@ -589,11 +589,15 @@ main {
   padding-top: var(--gap);
   display: grid;
   gap: var(--gap);
+  align-items: start;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     "status"
     "cards"
+    "chart"
     "ticket"
+    "orders"
+    "positions"
     "ladder"
     "tape";
 }
@@ -604,18 +608,24 @@ main {
     grid-template-areas:
       "status status"
       "cards cards"
+      "chart chart"
       "ladder ticket"
-      "ladder tape";
+      "ladder orders"
+      "tape positions";
   }
 }
 
 @media (min-width: 1100px) {
   .terminal {
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(280px, 0.9fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) minmax(
+        280px,
+        0.9fr
+      );
     grid-template-areas:
       "status status status"
       "cards cards cards"
-      "ladder tape ticket";
+      "ladder chart ticket"
+      "positions tape orders";
   }
 }
 
@@ -960,6 +970,247 @@ main {
 
 .orders li:last-child {
   border-bottom: 0;
+}
+
+/* Price chart */
+.chart {
+  grid-area: chart;
+}
+
+.chart-body {
+  position: relative;
+  height: 260px;
+}
+
+.chart-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 0.8125rem;
+  pointer-events: none;
+}
+
+.card-change {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Your orders and positions */
+.my-orders {
+  grid-area: orders;
+}
+
+.positions {
+  grid-area: positions;
+}
+
+.my-orders .empty,
+.positions .empty,
+.leaderboard .empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.order-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8125rem;
+}
+
+.order-list li:last-child {
+  border-bottom: 0;
+}
+
+.order-desc {
+  flex: 1;
+  min-width: 0;
+}
+
+.side-tag {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.side-tag.buy {
+  background: var(--bid-soft);
+  color: var(--bid);
+}
+
+.side-tag.sell {
+  background: var(--ask-soft);
+  color: var(--ask);
+}
+
+.panel-note {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.panel-note:empty {
+  display: none;
+}
+
+.positions table,
+.leaderboard table,
+.sessions table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.positions th,
+.leaderboard th,
+.sessions thead th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.positions td,
+.leaderboard td,
+.sessions td,
+.sessions tbody th {
+  padding: 6px 12px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.positions th:first-child,
+.positions td:first-child,
+.leaderboard th:nth-child(2),
+.leaderboard td:nth-child(2),
+.sessions th:first-child,
+.sessions td:nth-child(2),
+.sessions tbody th {
+  text-align: left;
+}
+
+.sessions tbody th {
+  font-weight: 400;
+}
+
+.sessions .sym {
+  font-family: var(--font-head);
+  font-weight: 700;
+}
+
+.positions tr:last-child td,
+.leaderboard tr:last-child td,
+.sessions tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.pnl {
+  font-weight: 600;
+}
+
+.leaderboard .mine {
+  background: var(--accent-soft);
+}
+
+.leaderboard .tag,
+.leaderboard .you {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.leaderboard .tag {
+  color: var(--muted);
+}
+
+.leaderboard .you {
+  color: var(--accent);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.stream-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.reset-note {
+  color: var(--warn);
+}
+
+/* Operate */
+.operate {
+  padding-top: var(--gap);
+  display: grid;
+  gap: var(--gap);
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "status"
+    "lede"
+    "sessions"
+    "leaders"
+    "positions";
+}
+
+.operate .status-line h1 {
+  font-size: 1.5rem;
+}
+
+.operate-lede {
+  grid-area: lede;
+  max-width: 80ch;
+  font-size: 0.875rem;
+}
+
+.operate .sessions {
+  grid-area: sessions;
+}
+
+.operate .leaderboard {
+  grid-area: leaders;
+}
+
+@media (min-width: 900px) {
+  .operate {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "status status"
+      "lede lede"
+      "sessions sessions"
+      "leaders positions";
+  }
 }
 
 /* Placeholder pages */

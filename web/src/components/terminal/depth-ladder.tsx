@@ -7,7 +7,8 @@ const LEVELS = 10;
 
 export const DepthLadder = component$(() => {
   const market = useContext(MarketContext);
-  const book = market.book;
+  const symbol = market.selected;
+  const book = market.books[symbol] ?? { asks: [], bids: [], loaded: false };
 
   // Worst ask at the top so the best prices meet at the spread row.
   const asks = book.asks.slice(0, LEVELS).reverse();
@@ -53,12 +54,12 @@ export const DepthLadder = component$(() => {
   return (
     <section class="panel ladder" aria-labelledby="ladder-title">
       <div class="panel-head">
-        <h2 id="ladder-title">Order book {book.symbol}</h2>
+        <h2 id="ladder-title">Order book {symbol}</h2>
       </div>
       <table>
         <caption class="visually-hidden">
-          Resting orders for {book.symbol}: asks above, bids below. Select a
-          price to copy it into the order ticket.
+          Resting orders for {symbol}: asks above, bids below. Select a price to
+          copy it into the order ticket.
         </caption>
         <thead>
           <tr>
@@ -67,21 +68,15 @@ export const DepthLadder = component$(() => {
           </tr>
         </thead>
         <tbody>
-          {book.error ? (
-            <tr class="empty">
-              <td colSpan={2} role="status">
-                {book.error}
-              </td>
-            </tr>
-          ) : !book.loaded ? (
+          {!book.loaded ? (
             <tr class="empty">
               <td colSpan={2}>Loading the order book.</td>
             </tr>
           ) : empty ? (
             <tr class="empty">
               <td colSpan={2}>
-                No resting orders for {book.symbol}. Place a limit order to
-                start the book.
+                No resting orders for {symbol}. Place a limit order to start the
+                book.
               </td>
             </tr>
           ) : (
@@ -94,7 +89,15 @@ export const DepthLadder = component$(() => {
               {asks.map((l) => row(l, "ask"))}
               <tr class="spread">
                 <td colSpan={2}>
-                  {spread !== null ? (
+                  {spread !== null && Number(spread) <= 0 ? (
+                    <>
+                      Crossed by{" "}
+                      <span class="num">
+                        {Math.abs(Number(spread)).toFixed(2)}
+                      </span>
+                      . The opening auction matches these.
+                    </>
+                  ) : spread !== null ? (
                     <>
                       Spread <span class="num">{spread}</span>
                     </>

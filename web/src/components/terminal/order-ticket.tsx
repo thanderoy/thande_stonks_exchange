@@ -5,20 +5,19 @@ import {
   useSignal,
   useTask$,
 } from "@builder.io/qwik";
-import { ApiError, cancelOrder, submitOrder } from "~/api/client";
+import { ApiError, submitOrder } from "~/api/client";
 import type { Side, SubmitOrderRequest, TimeInForce } from "~/api/types";
 import {
   PRICE_MAX,
   PRICE_MIN,
-  formatPrice,
-  formatQty,
   summarizeOrderResult,
   tifLabel,
   validateOrderForm,
   type OrderFormErrors,
 } from "~/lib/format";
+import { addPlacedOrder } from "~/state/apply-event";
 import { GuestContext } from "~/state/guest";
-import { MarketContext, type MyOrder } from "~/state/market";
+import { MarketContext } from "~/state/market";
 
 const TIFS: TimeInForce[] = [
   "GoodTillCanceled",
@@ -26,8 +25,6 @@ const TIFS: TimeInForce[] = [
   "ImmediateOrCancel",
   "FillOrKill",
 ];
-
-const MY_ORDERS_LIMIT = 8;
 
 export const OrderTicket = component$(() => {
   const market = useContext(MarketContext);
@@ -99,46 +96,22 @@ export const OrderTicket = component$(() => {
           tif.value,
         ),
       };
-      const rests =
-        kind.value === "Limit" &&
-        (tif.value === "GoodTillCanceled" || tif.value === "Day");
-      const filled = res.trades.reduce((n, t) => n + Number(t.quantity), 0);
-      if (rests && filled < Number(order.quantity)) {
-        const entry: MyOrder = {
+      if (res.status === "resting") {
+        addPlacedOrder(market, {
           orderId: res.order_id,
           symbol,
           side: order.side,
-          summary: `${order.side} ${formatQty(order.quantity)} ${symbol} @ ${formatPrice(price.value)}`,
-          status: "working",
-        };
-        market.myOrders = [entry, ...market.myOrders].slice(0, MY_ORDERS_LIMIT);
+          price:
+            order.order_type.type === "Limit" ? order.order_type.price : null,
+          remaining: res.remaining,
+          status: "resting",
+          confirmed: false,
+        });
       }
     } catch (err) {
       result.value = { tone: "error", text: await handleError(err) };
     } finally {
       busy.value = false;
-    }
-  });
-
-  const cancel = $(async (orderId: string) => {
-    const order = market.myOrders.find((o) => o.orderId === orderId);
-    if (!order || order.status !== "working") return;
-    order.status = "cancelling";
-    try {
-      await cancelOrder(order.orderId, order.symbol, order.side);
-      order.status = "cancelled";
-      result.value = { tone: "ok", text: `Cancelled: ${order.summary}.` };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        order.status = "done";
-        result.value = {
-          tone: "error",
-          text: "That order is no longer on the book. It has filled or was already cancelled.",
-        };
-      } else {
-        order.status = "working";
-        result.value = { tone: "error", text: await handleError(err) };
-      }
     }
   });
 
@@ -268,34 +241,6 @@ export const OrderTicket = component$(() => {
             {result.value?.text ?? ""}
           </p>
         </form>
-
-        {market.myOrders.length > 0 && (
-          <div class="orders">
-            <h2>Your orders on this page</h2>
-            <ul>
-              {market.myOrders.map((o) => (
-                <li key={o.orderId}>
-                  <span class="num">{o.summary}</span>
-                  {o.status === "working" || o.status === "cancelling" ? (
-                    <button
-                      type="button"
-                      class="btn btn-small"
-                      disabled={o.status === "cancelling"}
-                      aria-label={`Cancel ${o.summary}`}
-                      onClick$={() => cancel(o.orderId)}
-                    >
-                      {o.status === "cancelling" ? "Cancelling" : "Cancel"}
-                    </button>
-                  ) : (
-                    <span class="muted">
-                      {o.status === "cancelled" ? "Cancelled" : "Closed"}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
     </section>
   );
