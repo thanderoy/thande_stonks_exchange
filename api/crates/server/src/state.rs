@@ -1,4 +1,5 @@
 use crate::market::MarketStats;
+use crate::metrics::Metrics;
 use crate::sandbox::{SandboxConfig, SandboxInfo};
 use chrono::{DateTime, Utc};
 use common::Symbol;
@@ -57,6 +58,9 @@ pub struct AppState {
     pub dirty_books: Mutex<HashSet<String>>,
     /// Incremented by every market reset, so long-running tasks (bots) notice one.
     pub reset_epoch: AtomicU64,
+    pub metrics: Metrics,
+    /// Guest → when their last load burst started.
+    pub burst_cooldowns: DashMap<String, std::time::Instant>,
 }
 
 impl AppState {
@@ -90,6 +94,8 @@ impl AppState {
             market: Mutex::new(MarketStats::default()),
             dirty_books: Mutex::new(HashSet::new()),
             reset_epoch: AtomicU64::new(0),
+            metrics: Metrics::default(),
+            burst_cooldowns: DashMap::new(),
         }
     }
 }

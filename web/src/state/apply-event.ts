@@ -9,6 +9,7 @@ import type {
 } from "~/api/types";
 import { tickDirection } from "~/lib/format";
 import {
+  ACTIVITY_LIMIT,
   SERIES_LIMIT,
   TAPE_LIMIT,
   emptyBook,
@@ -18,6 +19,7 @@ import {
   type PricePoint,
   type SymbolSummary,
   type TapeEntry,
+  type ActivityEntry,
 } from "./market";
 
 /** Follow-up work a caller should do after folding in an event. */
@@ -79,6 +81,35 @@ export function applyStreamEvent(
       state.myOrders = state.myOrders.filter((o) => o.orderId !== ev.order_id);
       return {};
     }
+    case "order_activity": {
+      logActivity(state, {
+        key: `${ev.order_id}-${ev.action}`,
+        symbol: ev.symbol,
+        at: Date.now(),
+        kind: "order",
+        orderId: ev.order_id,
+        participant: ev.participant,
+        side: ev.side,
+        price: ev.price,
+        quantity: ev.quantity,
+        remaining: ev.remaining,
+        fills: ev.fills,
+        action: ev.action,
+      });
+      return {};
+    }
+    case "auction": {
+      logActivity(state, {
+        key: `auction-${ev.symbol}-${Date.now()}-${state.activity.length}`,
+        symbol: ev.symbol,
+        at: Date.now(),
+        kind: "auction",
+        price: ev.price,
+        volume: ev.volume,
+        trades: ev.trades,
+      });
+      return {};
+    }
     case "book_update": {
       state.books[ev.symbol] = { asks: ev.asks, bids: ev.bids, loaded: true };
       return {};
@@ -113,6 +144,7 @@ export function applyStreamEvent(
         state.series[symbol] = [];
       }
       state.tape = [];
+      state.activity = [];
       state.myOrders = [];
       if (state.account) {
         state.account = {
@@ -240,10 +272,15 @@ function dropSymbol(state: MarketState, symbol: string) {
   delete state.books[symbol];
   delete state.series[symbol];
   state.tape = state.tape.filter((t) => t.symbol !== symbol);
+  state.activity = state.activity.filter((a) => a.symbol !== symbol);
   state.myOrders = state.myOrders.filter((o) => o.symbol !== symbol);
   if (state.selected === symbol && state.order.length > 0) {
     state.selected = state.order[0];
   }
+}
+
+function logActivity(state: MarketState, entry: ActivityEntry) {
+  state.activity = [entry, ...state.activity].slice(0, ACTIVITY_LIMIT);
 }
 
 function summaryFor(state: MarketState, symbol: string): SymbolSummary {

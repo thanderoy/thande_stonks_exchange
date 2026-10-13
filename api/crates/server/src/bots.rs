@@ -55,6 +55,7 @@ pub fn register(state: &AppState) {
     let huge = Decimal::from(1_000_000_000u64);
     state.register_bot(MAKER_ID, "Maker bot", huge, huge, 1_000);
     state.register_bot(TAKER_ID, "Taker bot", huge, huge, 1_000);
+    state.register_bot(crate::burst::LOAD_ID, "Load bot", huge, huge, 1_000_000);
 }
 
 /// Starts one bot task per configured symbol.

@@ -4,7 +4,7 @@ use chrono::{Duration, Utc};
 use common::Symbol;
 use engine::order::{Order, OrderStatus, Side, TimeInForce};
 use engine::session::SessionState;
-use market_data::{EventBus, MarketEvent};
+use market_data::{Activity, EventBus, MarketEvent};
 use persistence::wal::{WalEntry, WriteAheadLog};
 use risk::{ParticipantLimits, RiskEngine, SymbolLimits};
 use rust_decimal::Decimal;
@@ -101,6 +101,8 @@ fn tag(event: &MarketEvent) -> &'static str {
         MarketEvent::SessionState { .. } => "session_state",
         MarketEvent::BookUpdate { .. } => "book_update",
         MarketEvent::SandboxRemoved { .. } => "sandbox_removed",
+        MarketEvent::OrderActivity { .. } => "order_activity",
+        MarketEvent::Auction { .. } => "auction",
         MarketEvent::MarketReset => "market_reset",
     }
 }
@@ -119,9 +121,26 @@ async fn submit_publishes_trades_then_a_private_accepted_event() {
     let events = drain(&mut rx);
     assert_eq!(
         events.iter().map(tag).collect::<Vec<_>>(),
-        ["trade", "order_accepted"]
+        ["trade", "order_activity", "order_accepted"]
     );
     match &events[1] {
+        MarketEvent::OrderActivity {
+            participant,
+            action,
+            fills,
+            remaining,
+            ..
+        } => {
+            assert_eq!(participant, "alice", "unnamed participants show their id");
+            assert_eq!(
+                (*action, *fills, *remaining),
+                (Activity::Rested, 1, dec!(6))
+            );
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert_eq!(events[1].owner(), None, "activity is public");
+    match &events[2] {
         MarketEvent::OrderAccepted {
             order_id,
             client_id,
@@ -137,7 +156,7 @@ async fn submit_publishes_trades_then_a_private_accepted_event() {
         }
         other => panic!("unexpected {other:?}"),
     }
-    assert_eq!(events[1].owner(), Some("alice"));
+    assert_eq!(events[2].owner(), Some("alice"));
     assert_eq!(events[0].owner(), None);
 }
 
@@ -154,6 +173,10 @@ async fn cancel_publishes_the_remaining_quantity_to_the_owner() {
     s.cancel(resting.id, SYM, Side::Sell).await.unwrap();
     match drain(&mut rx).as_slice() {
         [
+            MarketEvent::OrderActivity {
+                action: Activity::Cancelled,
+                ..
+            },
             MarketEvent::OrderCancelled {
                 client_id,
                 remaining,
@@ -313,7 +336,9 @@ async fn trade_history_is_newest_first_and_live_only() {
     );
     recovered.replay(entries).await.unwrap();
     assert!(recovered.recent_trades(SYM, 10).unwrap().is_empty());
-    let summary = &recovered.symbol_summaries(server::sandbox::Viewer::Admin).await[0];
+    let summary = &recovered
+        .symbol_summaries(server::sandbox::Viewer::Admin)
+        .await[0];
     assert_eq!((summary.last, summary.volume), (Some(dec!(101)), dec!(2)));
 }
 

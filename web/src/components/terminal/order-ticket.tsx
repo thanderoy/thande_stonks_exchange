@@ -238,7 +238,7 @@ export const OrderTicket = component$(() => {
             aria-live="polite"
             role="status"
           >
-            {result.value?.text ?? ""}
+            {result.value && <span>{result.value.text}</span>}
           </p>
         </form>
       </div>

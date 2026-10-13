@@ -35,6 +35,30 @@ pub enum MarketEvent {
         symbol: Symbol,
         state: String,
     },
+    /// Public: what the engine did with one order, for the engine view. Names the
+    /// participant by display name (or bot / pre-registered id), never a guest's client id.
+    OrderActivity {
+        order_id: OrderId,
+        symbol: Symbol,
+        participant: String,
+        side: Side,
+        /// Limit price; absent for a market order.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        price: Option<Decimal>,
+        quantity: Decimal,
+        /// Left on the book (`rested`) or dropped (`expired`, `killed`, `cancelled`).
+        remaining: Decimal,
+        /// Trades the order took part in when it arrived.
+        fills: usize,
+        action: Activity,
+    },
+    /// Public: the opening auction matched `volume` shares in `trades` trades at `price`.
+    Auction {
+        symbol: Symbol,
+        price: Decimal,
+        volume: Decimal,
+        trades: usize,
+    },
     /// Top levels of a book after it changed, as `[price, quantity]` pairs, best first.
     /// Changes are coalesced, so not every intermediate book is sent.
     BookUpdate {
@@ -52,6 +76,21 @@ pub enum MarketEvent {
     /// The shared market was reset: books, positions and trade history are empty and every
     /// symbol is back in pre-market.
     MarketReset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Activity {
+    /// Some or all of it is resting on the book.
+    Rested,
+    /// Filled completely on arrival.
+    Filled,
+    /// A market or IOC order whose unfilled remainder was dropped.
+    Expired,
+    /// A fill-or-kill order that couldn't fill completely, so nothing traded.
+    Killed,
+    /// A resting order was cancelled.
+    Cancelled,
 }
 
 impl MarketEvent {
@@ -72,6 +111,8 @@ impl MarketEvent {
             Self::OrderAccepted { symbol, .. }
             | Self::OrderCancelled { symbol, .. }
             | Self::SessionState { symbol, .. }
+            | Self::OrderActivity { symbol, .. }
+            | Self::Auction { symbol, .. }
             | Self::BookUpdate { symbol, .. }
             | Self::SandboxRemoved { symbol, .. } => Some(symbol.as_str()),
             Self::MarketReset => None,

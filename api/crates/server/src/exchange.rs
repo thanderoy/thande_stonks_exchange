@@ -14,10 +14,10 @@ use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use common::{OrderId, Symbol};
 use engine::matcher::{Trade, fill_outcome};
-use engine::order::{Order, Side};
+use engine::order::{Order, OrderStatus, OrderType, Side, TimeInForce};
 use engine::session::{SessionState, TradingSession};
 use engine::shard::EngineCommand;
-use market_data::MarketEvent;
+use market_data::{Activity, MarketEvent};
 use persistence::wal::WalEntry;
 use risk::RiskError;
 use rust_decimal::Decimal;
@@ -38,6 +38,8 @@ pub enum ExchangeError {
     SandboxesFull(usize),
     /// A sandbox action that doesn't fit its current state.
     SandboxConflict(String),
+    /// Another load burst is allowed in this many seconds.
+    BurstCooldown(u64),
 }
 
 impl ExchangeError {
@@ -50,6 +52,7 @@ impl ExchangeError {
             Self::Wal(_) | Self::ShardUnavailable => StatusCode::INTERNAL_SERVER_ERROR,
             Self::SandboxesFull(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::SandboxConflict(_) => StatusCode::CONFLICT,
+            Self::BurstCooldown(_) => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 }
@@ -79,6 +82,9 @@ impl fmt::Display for ExchangeError {
                 "all {max} sandboxes are in use; try again in a few minutes"
             ),
             Self::SandboxConflict(msg) => write!(f, "{msg}"),
+            Self::BurstCooldown(secs) => {
+                write!(f, "one burst every 10 seconds; try again in {secs} s")
+            }
         }
     }
 }
@@ -106,6 +112,14 @@ pub struct ReplayStats {
     pub applied: usize,
     /// Entries for symbols not configured in this run.
     pub skipped: usize,
+}
+
+fn limit_price(order_type: &OrderType) -> Option<Decimal> {
+    match order_type {
+        OrderType::Limit { price } => Some(*price),
+        OrderType::StopLimit { limit_price, .. } => Some(*limit_price),
+        OrderType::Market => None,
+    }
 }
 
 pub(crate) async fn request<T>(
@@ -140,13 +154,36 @@ impl AppState {
 
     pub(crate) fn log(&self, entry: &WalEntry) -> Result<(), ExchangeError> {
         match self.wal.lock().unwrap().as_mut() {
-            Some(wal) => wal.append(entry).map_err(ExchangeError::Wal),
+            Some(wal) => {
+                let started = Instant::now();
+                let result = wal.append(entry).map_err(ExchangeError::Wal);
+                self.metrics.record_wal(started.elapsed());
+                result
+            }
             None => Ok(()),
+        }
+    }
+
+    /// How the engine view names a participant: their display name, or the id of a
+    /// pre-registered participant. Never a guest's client id.
+    pub fn participant_label(&self, client_id: &str) -> String {
+        match self.participants.get(client_id) {
+            Some(p) => p.display_name.clone(),
+            None if client_id.starts_with(crate::guest::CLIENT_ID_PREFIX) => "Guest".into(),
+            None => client_id.to_string(),
         }
     }
 
     /// Session gate → risk check → WAL → shard. Returns any immediate fills.
     pub async fn submit(&self, order: Order) -> Result<Vec<Trade>, ExchangeError> {
+        let started = Instant::now();
+        let result = self.submit_inner(order).await;
+        self.metrics
+            .record_submit(started.elapsed(), result.is_ok());
+        result
+    }
+
+    async fn submit_inner(&self, order: Order) -> Result<Vec<Trade>, ExchangeError> {
         let symbol = order.symbol.as_str().to_string();
         let session = self.session(&symbol)?;
         let session = session.lock().await;
@@ -173,6 +210,27 @@ impl AppState {
         let trades = self.apply_submit(order, session.can_match()).await?;
         self.publish_trades(&trades);
         let (remaining, status) = fill_outcome(&accepted, &trades);
+        let action = match status {
+            OrderStatus::Resting => Activity::Rested,
+            OrderStatus::Filled => Activity::Filled,
+            OrderStatus::Expired
+                if trades.is_empty() && accepted.time_in_force == TimeInForce::FillOrKill =>
+            {
+                Activity::Killed
+            }
+            OrderStatus::Expired => Activity::Expired,
+        };
+        self.bus.publish(MarketEvent::OrderActivity {
+            order_id: accepted.id,
+            symbol: accepted.symbol.clone(),
+            participant: self.participant_label(&accepted.client_id),
+            side: accepted.side.clone(),
+            price: limit_price(&accepted.order_type),
+            quantity: accepted.quantity,
+            remaining,
+            fills: trades.len(),
+            action,
+        });
         self.bus.publish(MarketEvent::OrderAccepted {
             order_id: accepted.id,
             symbol: accepted.symbol,
@@ -239,6 +297,18 @@ impl AppState {
         self.touch_sandbox(symbol);
         let removed = self.apply_cancel(order_id, symbol, side.clone()).await?;
         if let Some(order) = &removed {
+            self.metrics.record_cancel();
+            self.bus.publish(MarketEvent::OrderActivity {
+                order_id,
+                symbol: order.symbol.clone(),
+                participant: self.participant_label(&order.client_id),
+                side: order.side.clone(),
+                price: limit_price(&order.order_type),
+                quantity: order.quantity,
+                remaining: order.quantity,
+                fills: 0,
+                action: Activity::Cancelled,
+            });
             self.bus.publish(MarketEvent::OrderCancelled {
                 order_id,
                 symbol: order.symbol.clone(),
@@ -350,6 +420,14 @@ impl AppState {
             .apply_session(symbol, &mut session, next.state.clone())
             .await?;
         self.publish_session(symbol, &next.state);
+        if let Some(first) = trades.first() {
+            self.bus.publish(MarketEvent::Auction {
+                symbol: Symbol::new(symbol),
+                price: first.price,
+                volume: trades.iter().map(|t| t.quantity).sum(),
+                trades: trades.len(),
+            });
+        }
         self.publish_trades(&trades);
         Ok((next.state, trades))
     }
@@ -539,6 +617,7 @@ impl AppState {
     /// Live path, under the session lock: audit WAL record, trade history and the
     /// `trade` market event for each trade.
     fn publish_trades(&self, trades: &[Trade]) {
+        self.metrics.record_trades(trades.len());
         for trade in trades {
             let audit = WalEntry::TradeExecuted {
                 trade_id: trade.id.0,

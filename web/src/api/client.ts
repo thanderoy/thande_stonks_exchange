@@ -10,6 +10,8 @@
 import type {
   Account,
   BookSnapshot,
+  BurstResult,
+  EngineView,
   CancelOrderResponse,
   Guest,
   JoinRequest,
@@ -17,6 +19,7 @@ import type {
   OpenOrdersResponse,
   Sandbox,
   SeedResponse,
+  Stats,
   SessionResponse,
   Side,
   SubmitOrderRequest,
@@ -262,4 +265,22 @@ export function changeSession(
       body: action === "halt" ? JSON.stringify({}) : undefined,
     },
   );
+}
+
+export function getEngine(symbol: string, levels = 6): Promise<EngineView> {
+  return request<EngineView>(
+    `/engine/${encodeURIComponent(symbol)}?levels=${levels}`,
+  );
+}
+
+export function getStats(): Promise<Stats> {
+  return request<Stats>("/stats");
+}
+
+/** Fire `count` random orders at the visitor's open sandbox (at most 200, once per 10 s). */
+export function burstSandbox(count: number): Promise<BurstResult> {
+  return request<BurstResult>("/me/sandbox/burst", {
+    method: "POST",
+    body: JSON.stringify({ count }),
+  });
 }

@@ -1,6 +1,7 @@
 use crate::matcher::{Trade, add_to_book, cancel_order, find_order, match_order, uncross};
 use crate::order::{Order, Side};
 use crate::orderbook::{OrderBook, PriceLevel};
+use chrono::{DateTime, Utc};
 use common::{OrderId, Symbol};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,63 @@ pub enum EngineCommand {
     OpenOrders(Option<String>, mpsc::Sender<Vec<Order>>),
     /// Removes every resting order (market reset).
     Clear(mpsc::Sender<()>),
+    /// The top `levels` price levels per side with their orders in queue order, at most
+    /// `orders_per_level` of each. Read-only.
+    Queues {
+        levels: usize,
+        orders_per_level: usize,
+        reply: mpsc::Sender<QueueSnapshot>,
+    },
+}
+
+/// One resting order as it sits in its price level's queue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueuedOrder {
+    pub id: OrderId,
+    pub client_id: String,
+    pub remaining: Decimal,
+    pub submitted_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueLevel {
+    pub price: Decimal,
+    pub total: Decimal,
+    /// Front of the queue (fills first) first.
+    pub orders: Vec<QueuedOrder>,
+    /// Orders further back that were left out.
+    pub hidden: usize,
+}
+
+/// Per-order view of a book: best price first on each side.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct QueueSnapshot {
+    pub bids: Vec<QueueLevel>,
+    pub asks: Vec<QueueLevel>,
+}
+
+/// The top `levels` levels per side, best first, each with up to `orders_per_level` orders.
+pub fn queue_snapshot(book: &OrderBook, levels: usize, orders_per_level: usize) -> QueueSnapshot {
+    let level = |(price, level): (&Decimal, &PriceLevel)| QueueLevel {
+        price: *price,
+        total: level.total_quantity,
+        orders: level
+            .orders
+            .iter()
+            .take(orders_per_level)
+            .map(|o| QueuedOrder {
+                id: o.id,
+                client_id: o.client_id.clone(),
+                remaining: o.quantity - o.filled_quantity,
+                submitted_at: o.submitted_at,
+            })
+            .collect(),
+        hidden: level.orders.len().saturating_sub(orders_per_level),
+    };
+    QueueSnapshot {
+        bids: book.bids.iter().rev().take(levels).map(level).collect(),
+        asks: book.asks.iter().take(levels).map(level).collect(),
+    }
 }
 
 /// Top `depth` levels per side, aggregated by remaining quantity.
@@ -99,6 +157,15 @@ pub fn start_shard(symbol: Symbol) -> mpsc::Sender<EngineCommand> {
                 }
                 EngineCommand::OpenOrders(client_id, reply) => {
                     let _ = reply.send(open_orders(&book, client_id.as_deref())).await;
+                }
+                EngineCommand::Queues {
+                    levels,
+                    orders_per_level,
+                    reply,
+                } => {
+                    let _ = reply
+                        .send(queue_snapshot(&book, levels, orders_per_level))
+                        .await;
                 }
                 EngineCommand::Clear(reply) => {
                     book.bids.clear();
