@@ -89,3 +89,78 @@ async fn cancel_nonexistent_returns_none() {
     let result = cancel(&tx, OrderId::new(), Side::Buy).await;
     assert!(result.is_none());
 }
+
+async fn open_orders(tx: &mpsc::Sender<EngineCommand>, client_id: Option<&str>) -> Vec<Order> {
+    let (reply_tx, mut reply_rx) = mpsc::channel(1);
+    tx.send(EngineCommand::OpenOrders(
+        client_id.map(str::to_string),
+        reply_tx,
+    ))
+    .await
+    .unwrap();
+    reply_rx.recv().await.unwrap()
+}
+
+fn gtc(side: Side, price: rust_decimal::Decimal, client: &str) -> Order {
+    Order::new_limit(
+        sym(),
+        side,
+        price,
+        dec!(10),
+        TimeInForce::GoodTillCanceled,
+        client,
+    )
+}
+
+#[tokio::test]
+async fn open_orders_lists_best_first_and_filters_by_client() {
+    let tx = start_shard(sym());
+    let low_bid = gtc(Side::Buy, dec!(99), "a");
+    let high_bid = gtc(Side::Buy, dec!(100), "b");
+    let ask = gtc(Side::Sell, dec!(101), "a");
+    for o in [low_bid.clone(), high_bid.clone(), ask.clone()] {
+        submit(&tx, o).await;
+    }
+
+    let all: Vec<OrderId> = open_orders(&tx, None).await.iter().map(|o| o.id).collect();
+    assert_eq!(all, vec![high_bid.id, low_bid.id, ask.id]);
+
+    let mine: Vec<OrderId> = open_orders(&tx, Some("a"))
+        .await
+        .iter()
+        .map(|o| o.id)
+        .collect();
+    assert_eq!(mine, vec![low_bid.id, ask.id]);
+}
+
+#[tokio::test]
+async fn open_orders_report_remaining_quantity_after_a_partial_fill() {
+    let tx = start_shard(sym());
+    submit(&tx, gtc(Side::Sell, dec!(100), "maker")).await;
+    let taker = Order::new_limit(
+        sym(),
+        Side::Buy,
+        dec!(100),
+        dec!(4),
+        TimeInForce::ImmediateOrCancel,
+        "taker",
+    );
+    submit(&tx, taker).await;
+
+    let resting = open_orders(&tx, Some("maker")).await;
+    assert_eq!(resting.len(), 1);
+    assert_eq!(resting[0].quantity, dec!(6));
+}
+
+#[tokio::test]
+async fn clear_empties_the_book() {
+    let tx = start_shard(sym());
+    submit(&tx, gtc(Side::Buy, dec!(99), "a")).await;
+    submit(&tx, gtc(Side::Sell, dec!(101), "b")).await;
+
+    let (reply_tx, mut reply_rx) = mpsc::channel(1);
+    tx.send(EngineCommand::Clear(reply_tx)).await.unwrap();
+    reply_rx.recv().await.unwrap();
+
+    assert!(open_orders(&tx, None).await.is_empty());
+}
