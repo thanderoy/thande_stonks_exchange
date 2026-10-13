@@ -15,6 +15,8 @@ import type {
   JoinRequest,
   LeaderboardResponse,
   OpenOrdersResponse,
+  Sandbox,
+  SeedResponse,
   SessionResponse,
   Side,
   SubmitOrderRequest,
@@ -215,4 +217,49 @@ export function getMyOrders(): Promise<OpenOrdersResponse> {
 
 export function getMyAccount(): Promise<Account> {
   return request<Account>("/me/account");
+}
+
+/** The visitor's sandbox, or `null` when they have none (404). */
+export async function getSandbox(): Promise<Sandbox | null> {
+  try {
+    return await request<Sandbox>("/me/sandbox");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Creates the visitor's sandbox, or returns the one they have. */
+export function createSandbox(): Promise<Sandbox> {
+  return request<Sandbox>("/me/sandbox", { method: "POST" });
+}
+
+export async function deleteSandbox(): Promise<void> {
+  const res = await fetch(`${API_BASE}/me/sandbox`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  }).catch(() => {
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE);
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new ApiError(res.status, fallbackMessage(res.status));
+  }
+}
+
+export function seedSandbox(): Promise<SeedResponse> {
+  return request<SeedResponse>("/me/sandbox/seed", { method: "POST" });
+}
+
+/** Open, halt or resume a session. On the public listener: the visitor's sandbox only. */
+export function changeSession(
+  symbol: string,
+  action: "open" | "halt" | "resume",
+): Promise<SessionResponse> {
+  return request<SessionResponse>(
+    `/session/${encodeURIComponent(symbol)}/${action}`,
+    {
+      method: "POST",
+      body: action === "halt" ? JSON.stringify({}) : undefined,
+    },
+  );
 }

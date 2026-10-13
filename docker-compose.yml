@@ -20,6 +20,8 @@ services:
       BOT_INTERVAL_MS: "${BOT_INTERVAL_MS}"
       BOT_PRE_OPEN_SECS: "${BOT_PRE_OPEN_SECS}"
       RESET_AT: "${RESET_AT}"
+      SANDBOX_MAX: "${SANDBOX_MAX}"
+      SANDBOX_IDLE_MINS: "${SANDBOX_IDLE_MINS}"
     volumes:
       - waldata:/data
     depends_on:

@@ -1,12 +1,11 @@
 import { component$, useContext } from "@builder.io/qwik";
-import { SYMBOLS } from "~/api/types";
 import {
-  COMPANY_NAMES,
   formatChange,
   formatPrice,
   formatQty,
   sessionLabel,
   sessionTone,
+  symbolName,
 } from "~/lib/format";
 import { MarketContext } from "~/state/market";
 
@@ -36,13 +35,13 @@ export const SessionBoard = component$(() => {
             </tr>
           </thead>
           <tbody>
-            {SYMBOLS.map((sym) => {
+            {market.order.map((sym) => {
               const s = market.symbols[sym];
               return (
                 <tr key={sym}>
                   <th scope="row">
                     <span class="sym">{sym}</span>
-                    <span class="muted small"> {COMPANY_NAMES[sym]}</span>
+                    <span class="muted small"> {symbolName(sym, s.kind)}</span>
                   </th>
                   <td>
                     <span class="pill" data-tone={sessionTone(s.session)}>

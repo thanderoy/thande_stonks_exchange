@@ -7,4 +7,5 @@ pub mod handlers;
 pub mod market;
 pub mod openapi;
 pub mod reset;
+pub mod sandbox;
 pub mod state;

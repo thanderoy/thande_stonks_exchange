@@ -48,6 +48,19 @@ pub enum WalEntry {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         registered_at: Option<DateTime<Utc>>,
     },
+    /// A symbol created at runtime: a guest's sandbox. Replay starts its shard and session
+    /// before any of its orders.
+    SymbolCreated {
+        symbol: String,
+        owner: String,
+        reference_price: Decimal,
+        price_collar_pct: Decimal,
+        created_at: DateTime<Utc>,
+    },
+    /// A runtime symbol was removed (deleted by its owner, or idle). Its book goes with it.
+    SymbolRemoved {
+        symbol: String,
+    },
 }
 
 pub struct WriteAheadLog {

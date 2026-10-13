@@ -9,8 +9,8 @@
  * here. Never parse them into floats for anything that goes back to the server.
  */
 
+/** The shared symbols, shown before `/v1/symbols` answers. */
 export const SYMBOLS = ["AAPL", "MSFT", "GOOGL"] as const;
-export type Ticker = (typeof SYMBOLS)[number];
 
 /** A decimal number encoded as a string, e.g. "100.25". */
 export type DecimalString = string;
@@ -99,8 +99,11 @@ export interface SessionResponse {
 }
 
 /** `GET /v1/symbols`: one entry per symbol. Stats cover the time since the last reset. */
+export type SymbolKind = "shared" | "sandbox";
+
 export interface SymbolSummary {
   symbol: string;
+  kind: SymbolKind;
   state: SessionState;
   open: DecimalString | null;
   last: DecimalString | null;
@@ -149,6 +152,21 @@ export interface Account {
   cash: DecimalString;
   positions: Position[];
   pnl: DecimalString;
+}
+
+/** `GET/POST /v1/me/sandbox`: the visitor's private symbol. */
+export interface Sandbox {
+  symbol: string;
+  state: SessionState;
+  created_at: string;
+  /** Seconds of inactivity left before it is removed. */
+  expires_in_secs: number;
+}
+
+export interface SeedResponse {
+  orders: number;
+  /** True when the orders were placed crossed, before the open. */
+  crossed: boolean;
 }
 
 export interface LeaderboardEntry {
@@ -206,6 +224,14 @@ export interface BookUpdateEvent {
   asks: BookLevel[];
 }
 
+/** Private: the visitor's sandbox was removed. */
+export interface SandboxRemovedEvent {
+  event: "sandbox_removed";
+  symbol: string;
+  client_id: string;
+  reason: "deleted" | "idle" | string;
+}
+
 /** Books, positions and history were cleared; every symbol is back in pre-market. */
 export interface MarketResetEvent {
   event: "market_reset";
@@ -223,4 +249,5 @@ export type StreamEvent =
   | OrderCancelledEvent
   | SessionStateEvent
   | BookUpdateEvent
+  | SandboxRemovedEvent
   | MarketResetEvent;

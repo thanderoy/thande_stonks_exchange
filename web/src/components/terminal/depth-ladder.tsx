@@ -5,9 +5,14 @@ import { MarketContext } from "~/state/market";
 
 const LEVELS = 10;
 
-export const DepthLadder = component$(() => {
+interface DepthLadderProps {
+  /** Defaults to the selected symbol. */
+  symbol?: string;
+}
+
+export const DepthLadder = component$<DepthLadderProps>((props) => {
   const market = useContext(MarketContext);
-  const symbol = market.selected;
+  const symbol = props.symbol ?? market.selected;
   const book = market.books[symbol] ?? { asks: [], bids: [], loaded: false };
 
   // Worst ask at the top so the best prices meet at the spread row.
@@ -52,9 +57,9 @@ export const DepthLadder = component$(() => {
   const empty = book.loaded && asks.length === 0 && bids.length === 0;
 
   return (
-    <section class="panel ladder" aria-labelledby="ladder-title">
+    <section class="panel ladder" aria-labelledby={`ladder-title-${symbol}`}>
       <div class="panel-head">
-        <h2 id="ladder-title">Order book {symbol}</h2>
+        <h2 id={`ladder-title-${symbol}`}>Order book {symbol}</h2>
       </div>
       <table>
         <caption class="visually-hidden">

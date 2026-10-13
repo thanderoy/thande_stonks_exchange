@@ -5,6 +5,7 @@
 //! so they survive a restart. Recent trades are recorded on the live path only, because
 //! replay regenerates trades with new ids and timestamps.
 
+use crate::sandbox::Viewer;
 use crate::state::{AppState, ParticipantKind};
 use common::Symbol;
 use engine::matcher::Trade;
@@ -44,7 +45,8 @@ pub struct MarketStats {
 }
 
 impl MarketStats {
-    pub fn record_fill(&mut self, trade: &Trade) {
+    /// Updates the symbol's stats, and both sides' cash when `count_cash`.
+    pub fn record_fill(&mut self, trade: &Trade, count_cash: bool) {
         let stats = self
             .symbols
             .entry(trade.symbol.as_str().to_string())
@@ -56,6 +58,9 @@ impl MarketStats {
         stats.volume += trade.quantity;
         stats.trades += 1;
 
+        if !count_cash {
+            return;
+        }
         let notional = trade.price * trade.quantity;
         *self.cash.entry(trade.buyer_client_id.clone()).or_default() -= notional;
         *self.cash.entry(trade.seller_client_id.clone()).or_default() += notional;
@@ -71,9 +76,19 @@ impl MarketStats {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolKind {
+    /// One of the configured symbols everyone trades.
+    Shared,
+    /// A guest's private sandbox.
+    Sandbox,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SymbolSummary {
     pub symbol: String,
+    pub kind: SymbolKind,
     pub state: SessionState,
     pub open: Option<Decimal>,
     pub last: Option<Decimal>,
@@ -162,13 +177,21 @@ impl AppState {
         rx.recv().await
     }
 
-    /// Resting orders across every symbol, optionally only one client's.
+    /// Resting orders across every symbol (shared ones first, then sandboxes),
+    /// optionally only one client's.
     pub async fn open_orders(&self, client_id: Option<&str>) -> Vec<Order> {
         let mut orders = Vec::new();
-        for symbol in &self.symbols {
-            orders.extend(self.open_orders_in(symbol, client_id).await);
+        for symbol in self.all_symbols() {
+            orders.extend(self.open_orders_in(&symbol, client_id).await);
         }
         orders
+    }
+
+    /// Shared symbols in configured order, then sandboxes by name.
+    pub fn all_symbols(&self) -> Vec<String> {
+        let mut sandboxes: Vec<String> = self.sandboxes.iter().map(|s| s.key().clone()).collect();
+        sandboxes.sort();
+        self.symbols.iter().cloned().chain(sandboxes).collect()
     }
 
     pub async fn open_orders_in(&self, symbol: &str, client_id: Option<&str>) -> Vec<Order> {
@@ -183,9 +206,16 @@ impl AppState {
         rx.recv().await.unwrap_or_default()
     }
 
-    pub async fn symbol_summaries(&self) -> Vec<SymbolSummary> {
-        let mut out = Vec::with_capacity(self.symbols.len());
-        for symbol in &self.symbols {
+    /// Every symbol `viewer` can see: the shared ones, plus their own sandbox (all
+    /// sandboxes for the admin).
+    pub async fn symbol_summaries(&self, viewer: Viewer<'_>) -> Vec<SymbolSummary> {
+        let symbols: Vec<String> = self
+            .all_symbols()
+            .into_iter()
+            .filter(|s| self.visible_to(s, viewer))
+            .collect();
+        let mut out = Vec::with_capacity(symbols.len());
+        for symbol in &symbols {
             let Some(session) = self.sessions.get(symbol).map(|s| s.clone()) else {
                 continue;
             };
@@ -202,6 +232,11 @@ impl AppState {
             let band = reference_price * collar_pct / Decimal::ONE_HUNDRED;
             out.push(SymbolSummary {
                 symbol: symbol.clone(),
+                kind: if self.is_sandbox(symbol) {
+                    SymbolKind::Sandbox
+                } else {
+                    SymbolKind::Shared
+                },
                 state,
                 open: stats.open,
                 last: stats.last,

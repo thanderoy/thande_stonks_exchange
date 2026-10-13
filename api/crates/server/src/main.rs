@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use server::app::{self, PublicConfig, PublicLimits};
 use server::bots::{self, BotConfig};
 use server::client_ip::parse_trusted_proxies;
+use server::sandbox::SandboxConfig;
 use server::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -88,7 +89,9 @@ async fn main() -> std::io::Result<()> {
 
     let risk = RiskEngine::new(participant_limits, symbol_limits);
     let bus = Arc::new(EventBus::new(1024));
-    let state = Arc::new(AppState::new(&symbols, risk, bus, pool));
+    let mut state = AppState::new(&symbols, risk, bus, pool);
+    state.sandbox_config = sandbox_config_from_env()?;
+    let state = Arc::new(state);
     bots::register(&state);
 
     let wal_path = std::env::var("WAL_PATH").unwrap_or_else(|_| "exchange.wal".to_string());
@@ -105,6 +108,12 @@ async fn main() -> std::io::Result<()> {
     *state.wal.lock().unwrap() = Some(wal);
 
     state.spawn_book_publisher(Duration::from_millis(100));
+    state.spawn_sandbox_sweeper(Duration::from_secs(60));
+    tracing::info!(
+        "Sandboxes: at most {}, removed after {} idle minutes",
+        state.sandbox_config.max,
+        state.sandbox_config.idle.as_secs() / 60
+    );
     match bot_config {
         Some(config) => {
             tracing::info!(
@@ -150,6 +159,31 @@ async fn main() -> std::io::Result<()> {
     Ok(())
 }
 
+/// `SANDBOX_MAX` and `SANDBOX_IDLE_MINS`, over the defaults.
+fn sandbox_config_from_env() -> std::io::Result<SandboxConfig> {
+    let mut config = SandboxConfig::default();
+    if let Some(max) = env_number("SANDBOX_MAX")? {
+        config.max = max as usize;
+    }
+    if let Some(mins) = env_number("SANDBOX_IDLE_MINS")? {
+        config.idle = Duration::from_secs(mins.max(1) * 60);
+    }
+    Ok(config)
+}
+
+/// A whole-number environment variable; `None` when unset or empty.
+fn env_number(name: &str) -> std::io::Result<Option<u64>> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw.trim().parse().map(Some).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{name} must be a whole number, got {raw:?}"),
+            )
+        }),
+        _ => Ok(None),
+    }
+}
+
 /// `BOTS=true` turns bots on; `BOT_INTERVAL_MS` and `BOT_PRE_OPEN_SECS` tune them.
 fn bot_config_from_env() -> std::io::Result<Option<BotConfig>> {
     let enabled = matches!(
@@ -162,15 +196,7 @@ fn bot_config_from_env() -> std::io::Result<Option<BotConfig>> {
         return Ok(None);
     }
     let number = |name: &str, default: u64| -> std::io::Result<u64> {
-        match std::env::var(name) {
-            Ok(raw) if !raw.trim().is_empty() => raw.trim().parse().map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("{name} must be a whole number, got {raw:?}"),
-                )
-            }),
-            _ => Ok(default),
-        }
+        Ok(env_number(name)?.unwrap_or(default))
     };
     Ok(Some(BotConfig {
         interval: Duration::from_millis(number("BOT_INTERVAL_MS", 2_000)?.max(100)),

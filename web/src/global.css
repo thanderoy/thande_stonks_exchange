@@ -687,7 +687,8 @@ main {
 .cards {
   grid-area: cards;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 0;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1180,8 +1181,97 @@ main {
     "status"
     "lede"
     "sessions"
+    "sandbox"
     "leaders"
     "positions";
+}
+
+.operate .sandbox {
+  grid-area: sandbox;
+}
+
+.sandbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sandbox-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sandbox-intro p {
+  max-width: 70ch;
+  font-size: 0.875rem;
+}
+
+.sandbox-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.sandbox-meta .sym {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  max-width: 80ch;
+}
+
+.steps li + li {
+  margin-top: 4px;
+}
+
+.steps strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sandbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-quiet {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.sandbox .result {
+  font-size: 0.875rem;
+  padding: 8px 10px;
+  border-left: 3px solid var(--line);
+  background: var(--sunk);
+}
+
+.sandbox .result.ok {
+  border-left-color: var(--bid);
+}
+
+.sandbox .result.error {
+  border-left-color: var(--ask);
+}
+
+.sandbox .result:empty {
+  display: none;
+}
+
+.sandbox > .ladder {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
 }
 
 .operate .status-line h1 {
@@ -1209,6 +1299,7 @@ main {
       "status status"
       "lede lede"
       "sessions sessions"
+      "sandbox sandbox"
       "leaders positions";
   }
 }

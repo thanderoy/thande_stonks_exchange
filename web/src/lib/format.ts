@@ -144,6 +144,11 @@ export const COMPANY_NAMES: Record<string, string> = {
   GOOGL: "Alphabet",
 };
 
+/** The line under a ticker: the company, or "Your sandbox". */
+export function symbolName(symbol: string, kind?: string): string {
+  return COMPANY_NAMES[symbol] ?? (kind === "sandbox" ? "Your sandbox" : "");
+}
+
 const TIF_LABELS: Record<string, string> = {
   GoodTillCanceled: "Good till cancelled",
   ImmediateOrCancel: "Immediate or cancel",

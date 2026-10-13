@@ -1,15 +1,15 @@
 //! Route tables for the two listeners that share one `AppState`.
 //!
 //! - **Public** (`API_BIND_ADDR`): what the internet reaches through the reverse proxy.
-//!   Guests join, trade as themselves and read market data. Per-IP rate limited. No
-//!   session control, no Swagger.
+//!   Guests join, trade as themselves, read market data and run their own sandbox.
+//!   Per-IP rate limited. Session control only on the caller's sandbox, no Swagger.
 //! - **Admin** (`ADMIN_BIND_ADDR`): the full API, including session control and Swagger,
 //!   with orders naming their `client_id` in the body. Bind it to localhost or a private
 //!   network only — it has no authentication.
 
 use crate::client_ip::ClientIpExtractor;
 use crate::handlers::orders::ErrorResponse;
-use crate::handlers::{admin, book, guest, health, market, orders, session, ws};
+use crate::handlers::{admin, book, guest, health, market, orders, sandbox, session, ws};
 use crate::openapi::ApiDoc;
 use actix_governor::governor::middleware::NoOpMiddleware;
 use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
@@ -136,15 +136,38 @@ pub fn configure_public(cfg: &mut web::ServiceConfig, config: &PublicConfig) {
             .route("/v1/me", web::get().to(guest::me))
             .route("/v1/me/orders", web::get().to(guest::my_orders))
             .route("/v1/me/account", web::get().to(guest::my_account))
+            .service(
+                web::resource("/v1/me/sandbox")
+                    .route(web::get().to(sandbox::get))
+                    .route(web::post().to(sandbox::create))
+                    .route(web::delete().to(sandbox::delete)),
+            )
+            .route("/v1/me/sandbox/seed", web::post().to(sandbox::seed))
             .route("/v1/orders", web::post().to(orders::submit_order_public))
             .route(
                 "/v1/orders/{id}",
                 web::delete().to(orders::cancel_order_public),
             )
-            .route("/v1/book/{symbol}", web::get().to(book::get_book))
-            .route("/v1/session/{symbol}", web::get().to(session::get_session))
-            .route("/v1/symbols", web::get().to(market::symbols))
-            .route("/v1/trades/{symbol}", web::get().to(market::trades))
+            .route("/v1/book/{symbol}", web::get().to(book::get_book_public))
+            .route(
+                "/v1/session/{symbol}",
+                web::get().to(session::get_session_public),
+            )
+            // Session control on the public listener is for the caller's own sandbox only.
+            .route(
+                "/v1/session/{symbol}/open",
+                web::post().to(session::open_session_public),
+            )
+            .route(
+                "/v1/session/{symbol}/halt",
+                web::post().to(session::halt_session_public),
+            )
+            .route(
+                "/v1/session/{symbol}/resume",
+                web::post().to(session::resume_session_public),
+            )
+            .route("/v1/symbols", web::get().to(market::symbols_public))
+            .route("/v1/trades/{symbol}", web::get().to(market::trades_public))
             .route("/v1/leaderboard", web::get().to(market::leaderboard_public))
             .route("/v1/stream", web::get().to(ws::stream_public)),
     );

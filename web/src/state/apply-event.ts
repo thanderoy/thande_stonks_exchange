@@ -2,6 +2,7 @@ import type {
   Account,
   BookSnapshot,
   OpenOrder,
+  Sandbox,
   StreamEvent,
   SymbolSummary as WireSummary,
   Trade,
@@ -86,12 +87,24 @@ export function applyStreamEvent(
       summaryFor(state, ev.symbol).session = ev.state;
       return {};
     }
+    case "sandbox_removed": {
+      if (myClientId && ev.client_id !== myClientId) return {};
+      dropSymbol(state, ev.symbol);
+      state.sandbox = null;
+      return {};
+    }
     case "market_reset": {
+      // The reset removed every sandbox.
+      for (const symbol of [...state.order]) {
+        if (state.symbols[symbol]?.kind === "sandbox")
+          dropSymbol(state, symbol);
+      }
+      state.sandbox = null;
       for (const symbol of Object.keys(state.symbols)) {
         const session = state.symbols[symbol].session;
         const collar = state.symbols[symbol];
         state.symbols[symbol] = {
-          ...emptySummary(),
+          ...emptySummary(collar.kind),
           session,
           collarLow: collar.collarLow,
           collarHigh: collar.collarHigh,
@@ -124,6 +137,8 @@ export interface Snapshot {
   /** Null when there is no guest session. */
   orders: OpenOrder[] | null;
   account: Account | null;
+  /** The visitor's sandbox; null when they have none (or no session). */
+  sandbox: Sandbox | null;
 }
 
 /** Replace the state with a fresh snapshot from the REST endpoints. */
@@ -132,9 +147,19 @@ export function applySnapshot(
   snap: Snapshot,
   myClientId: string,
 ): void {
+  const listed = snap.symbols.map((s) => s.symbol);
+  for (const symbol of [...state.order]) {
+    if (!listed.includes(symbol)) dropSymbol(state, symbol);
+  }
+  state.order = listed;
+  state.sandbox = snap.sandbox;
+  if (!listed.includes(state.selected) && listed.length > 0) {
+    state.selected = listed[0];
+  }
   for (const s of snap.symbols) {
-    const previous = state.symbols[s.symbol] ?? emptySummary();
+    const previous = state.symbols[s.symbol] ?? emptySummary(s.kind);
     state.symbols[s.symbol] = {
+      kind: s.kind,
       last: s.last,
       tick: previous.tick,
       session: s.state,
@@ -206,6 +231,19 @@ export function markedPnl(state: MarketState): number | null {
     pnl += Number(p.quantity) * Number(last);
   }
   return pnl;
+}
+
+/** Forget a symbol that no longer exists (a removed sandbox). */
+function dropSymbol(state: MarketState, symbol: string) {
+  state.order = state.order.filter((s) => s !== symbol);
+  delete state.symbols[symbol];
+  delete state.books[symbol];
+  delete state.series[symbol];
+  state.tape = state.tape.filter((t) => t.symbol !== symbol);
+  state.myOrders = state.myOrders.filter((o) => o.symbol !== symbol);
+  if (state.selected === symbol && state.order.length > 0) {
+    state.selected = state.order[0];
+  }
 }
 
 function summaryFor(state: MarketState, symbol: string): SymbolSummary {

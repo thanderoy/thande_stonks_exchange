@@ -36,8 +36,10 @@ export const TopBar = component$(() => {
               <Link
                 key={n.href}
                 href={n.href}
+                // "false" rather than undefined: Qwik leaves a removed attribute in
+                // place after client-side navigation, so two tabs looked current.
                 aria-current={
-                  path.startsWith(n.href.slice(0, -1)) ? "page" : undefined
+                  path.startsWith(n.href.slice(0, -1)) ? "page" : "false"
                 }
               >
                 {n.label}

@@ -135,6 +135,8 @@ open the selected symbol's session, `s` to submit, `w`/`W` to fire 10/100 random
 | `BOTS` | `false` | `true` runs the in-process bots on every symbol (see [Bots](#bots)) |
 | `BOT_INTERVAL_MS` | `2000` | Average time between bot ticks |
 | `BOT_PRE_OPEN_SECS` | `30` | With bots on, how long a symbol stays in pre-market before the bots open it |
+| `SANDBOX_MAX` | `200` | Most guest sandboxes at once; creating one past this returns `503` |
+| `SANDBOX_IDLE_MINS` | `30` | A sandbox with no orders, cancels or session changes for this long is removed |
 | `RESET_AT` | _(none)_ | Daily market reset time, `HH:MM` in UTC (see [Market reset](#market-reset)). Unset means no daily reset |
 | `RUST_LOG` | _(none)_ | Log filter, e.g. `server=debug` |
 
@@ -166,8 +168,9 @@ docker compose down -v
 `web/` is the public web demo: a [Qwik City](https://qwik.dev/) site built with the static
 adapter, so production is plain files plus a proxy, with no Node server. Pages: `/` (join with a
 display name), `/trade` (symbol cards, price chart, depth ladder, trade tape, order ticket, your
-open orders and positions), `/operate` (read-only sessions, market stats, leaderboard and your
-positions), and placeholders for `/engine` and `/load`. The app pages share one `/v1/stream`
+open orders and positions), `/operate` (sessions and market stats, your sandbox with its session
+controls and book, the leaderboard and your positions), and placeholders for `/engine` and
+`/load`. Your sandbox also appears as a fourth card on `/trade`. The app pages share one `/v1/stream`
 WebSocket: they load a snapshot from the REST endpoints when it connects (and after a reconnect
 or a `market_reset`), then apply book, trade and order events as they arrive. The chart uses
 [lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0).
@@ -222,12 +225,13 @@ Interactive Swagger UI is served on the admin listener at [`http://localhost:909
 | ----- | ---------------- | --------------- |
 | `GET /healthz` | yes | yes |
 | `POST /v1/join`, `GET /v1/me`, `GET /v1/me/orders`, `GET /v1/me/account` | yes | no |
+| `GET`/`POST`/`DELETE /v1/me/sandbox`, `POST /v1/me/sandbox/seed` | yes | no |
 | `POST /v1/orders` | as the session's guest | as the body's `client_id` |
 | `DELETE /v1/orders/{id}` | own orders only | any order |
-| `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}` | yes | yes |
-| `GET /v1/symbols`, `GET /v1/trades/{symbol}`, `GET /v1/leaderboard` | yes | yes |
-| `GET /v1/stream` | market events, plus your own order events | every event |
-| `POST /v1/session/{symbol}/open`, `/halt`, `/resume` | no | yes |
+| `GET /v1/book/{symbol}`, `GET /v1/session/{symbol}`, `GET /v1/trades/{symbol}` | shared symbols and your sandbox | yes |
+| `GET /v1/symbols`, `GET /v1/leaderboard` | yes | yes |
+| `GET /v1/stream` | market events, plus your own order and sandbox events | every event |
+| `POST /v1/session/{symbol}/open`, `/halt`, `/resume` | your sandbox only | yes |
 | `POST /v1/admin/reset` | no | yes |
 | Swagger UI, `/api-docs/openapi.json` | no | yes |
 
@@ -368,9 +372,34 @@ curl -b jar http://localhost:8080/v1/me/orders
 curl -b jar http://localhost:8080/v1/me/account
 ```
 
+### Sandboxes
+
+Each guest can have one private sandbox symbol, named like `SBX-K3X9Q0`. It starts in pre-market
+with the same 80–120 collar as the shared symbols, and only its owner can see it, trade it, open,
+halt and resume it, or get its events on the stream; everyone else gets `404`, as if it didn't
+exist. That's where a visitor can rest crossed orders before the open and watch the opening
+auction clear them, or halt it and watch new orders get `409`, without touching the shared
+market.
+
+```bash
+curl -b jar -X POST http://localhost:8080/v1/me/sandbox          # create (or return) yours
+# {"symbol":"SBX-K3X9Q0","state":"PreMarket","created_at":"...","expires_in_secs":1800}
+curl -b jar -X POST http://localhost:8080/v1/me/sandbox/seed     # six sample orders from the maker bot:
+                                                                  # crossed before the open, two-sided after
+curl -b jar -X POST http://localhost:8080/v1/session/SBX-K3X9Q0/open   # runs the opening auction
+curl -b jar -X POST http://localhost:8080/v1/session/SBX-K3X9Q0/halt -H 'Content-Type: application/json' -d '{}'
+curl -b jar -X DELETE http://localhost:8080/v1/me/sandbox        # remove it (and its book)
+```
+
+Sandboxes are in the WAL, so they survive a restart. One is removed after `SANDBOX_IDLE_MINS` without
+activity (its owner gets a private `sandbox_removed` event), at most `SANDBOX_MAX` exist at once,
+and a market reset removes them all. Sandbox trades move positions but not cash, so they never
+count towards P&L or the leaderboard; otherwise an owner could set their own sandbox's price by
+trading with themselves.
+
 ### Market reset
 
-A reset empties every book, clears positions, cash, price stats and trade history, puts every
+A reset removes every sandbox, empties every book, clears positions, cash, price stats and trade history, puts every
 symbol back in pre-market, and starts a fresh WAL, keeping the old one as `<WAL_PATH>.prev`. Guests
 who joined in the last 24 hours (the cookie lifetime) keep their accounts, because the new WAL
 starts by registering them again; older guests are removed and their sessions get `401`. Clients
@@ -442,7 +471,7 @@ Example events:
 Run these from `api/`:
 
 ```bash
-cargo test --workspace          # 146 tests
+cargo test --workspace          # 154 tests
 cargo test --test engine_matcher # single test binary
 cargo bench                     # matching engine benchmarks
 cargo clippy --workspace        # lint

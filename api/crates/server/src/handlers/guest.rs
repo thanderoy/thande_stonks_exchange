@@ -3,6 +3,7 @@
 use crate::exchange::Participant;
 use crate::guest;
 use crate::handlers::orders::ErrorResponse;
+use crate::sandbox::Viewer;
 use crate::state::AppState;
 use actix_session::Session;
 use actix_web::{HttpResponse, web};
@@ -44,6 +45,23 @@ impl From<Participant> for IdentityResponse {
 pub fn current_participant(session: &Session, state: &AppState) -> Option<Participant> {
     let client_id = session.get::<String>(SESSION_CLIENT_ID).ok().flatten()?;
     state.participant(&client_id)
+}
+
+/// Whether the public caller may see `symbol`: shared symbols always, a sandbox only
+/// when it is theirs.
+pub fn can_see(session: &Session, state: &AppState, symbol: &str) -> bool {
+    let me = current_participant(session, state);
+    state.visible_to(
+        symbol,
+        Viewer::Public(me.as_ref().map(|p| p.client_id.as_str())),
+    )
+}
+
+/// The 404 a hidden sandbox gets, the same as for a symbol that doesn't exist.
+pub fn symbol_not_found(symbol: &str) -> HttpResponse {
+    HttpResponse::NotFound().json(ErrorResponse {
+        error: format!("symbol {symbol} not found"),
+    })
 }
 
 pub fn unauthorized() -> HttpResponse {

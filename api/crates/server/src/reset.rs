@@ -1,4 +1,4 @@
-//! Market reset: every book emptied, positions, cash, stats and trade history cleared,
+//! Market reset: every sandbox removed, every book emptied, positions, cash, stats and trade history cleared,
 //! every symbol back in pre-market, and a fresh WAL. Guests who joined recently keep
 //! their accounts: the new WAL starts by registering them again.
 //!
@@ -39,6 +39,15 @@ impl AppState {
         let mut sessions = Vec::with_capacity(symbols.len());
         for symbol in &symbols {
             sessions.push(self.session(symbol)?.lock_owned().await);
+        }
+        // Sandboxes are removed outright; their owners can create a new one.
+        let mut sandboxes: Vec<String> = self.sandboxes.iter().map(|s| s.key().clone()).collect();
+        sandboxes.sort();
+        let mut sandbox_sessions = Vec::with_capacity(sandboxes.len());
+        for symbol in &sandboxes {
+            if let Ok(session) = self.session(symbol) {
+                sandbox_sessions.push((symbol.clone(), session.lock_owned().await));
+            }
         }
         for symbol in &symbols {
             request(&self.shard(symbol)?, EngineCommand::Clear).await?;
@@ -96,6 +105,10 @@ impl AppState {
                 guests_removed: removed.len(),
             }
         };
+        for (symbol, session) in sandbox_sessions.iter_mut() {
+            session.close();
+            self.apply_sandbox_removed(symbol);
+        }
         *self.market.lock().unwrap() = MarketStats::default();
 
         self.reset_epoch.fetch_add(1, Ordering::SeqCst);

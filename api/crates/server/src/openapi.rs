@@ -1,4 +1,4 @@
-use crate::handlers::{admin, book, guest, health, market, orders, session};
+use crate::handlers::{admin, book, guest, health, market, orders, sandbox, session};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -12,7 +12,9 @@ use utoipa::OpenApi;
             The public listener serves `/v1/join`, `/v1/me` (with the caller's orders and \
             account), orders as the session's guest, the market reads (book, session state, \
             symbols, trades, leaderboard) and the stream, where order events are sent only \
-            to their owner. It has no session control and no `/v1/admin`.",
+            to their owner. Each guest can have a private sandbox symbol (`/v1/me/sandbox`) \
+            that only they see, trade and control; there is no other session control and \
+            no `/v1/admin`.",
         contact(name = "Roy Thande"),
     ),
     paths(
@@ -32,6 +34,10 @@ use utoipa::OpenApi;
         market::trades,
         market::leaderboard,
         admin::reset,
+        sandbox::get,
+        sandbox::create,
+        sandbox::delete,
+        sandbox::seed,
     ),
     components(
         schemas(
@@ -57,6 +63,9 @@ use utoipa::OpenApi;
             crate::market::LeaderboardEntry,
             crate::state::ParticipantKind,
             crate::reset::ResetSummary,
+            crate::market::SymbolKind,
+            crate::sandbox::SandboxResponse,
+            crate::sandbox::SeedResponse,
             // engine types referenced in request/response bodies
             engine::order::Side,
             engine::order::OrderType,
@@ -79,6 +88,7 @@ use utoipa::OpenApi;
         (name = "book", description = "Order book snapshots"),
         (name = "market", description = "Symbols, recent trades and the leaderboard"),
         (name = "admin", description = "Market operations (admin listener only)"),
+        (name = "sandbox", description = "The caller's private sandbox symbol (public listener only)"),
     )
 )]
 pub struct ApiDoc;

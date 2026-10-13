@@ -90,6 +90,9 @@ pub async fn submit_order_public(
     let Some(me) = guest::current_participant(&session, &data) else {
         return guest::unauthorized();
     };
+    if !guest::can_see(&session, &data, &body.symbol) {
+        return guest::symbol_not_found(&body.symbol);
+    }
     submit_as(&body, me.client_id, &data).await
 }
 

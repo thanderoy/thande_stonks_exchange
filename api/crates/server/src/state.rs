@@ -1,4 +1,5 @@
 use crate::market::MarketStats;
+use crate::sandbox::{SandboxConfig, SandboxInfo};
 use chrono::{DateTime, Utc};
 use common::Symbol;
 use dashmap::DashMap;
@@ -29,8 +30,12 @@ pub struct ParticipantInfo {
 }
 
 pub struct AppState {
-    /// Configured symbols, in `SYMBOLS` order.
+    /// Configured (shared) symbols, in `SYMBOLS` order. Sandboxes are not in here.
     pub symbols: Vec<String>,
+    /// Sandbox symbol → its owner and activity. Their shards and sessions live in `shards`
+    /// and `sessions` next to the shared symbols'.
+    pub sandboxes: DashMap<String, SandboxInfo>,
+    pub sandbox_config: SandboxConfig,
     /// symbol string → shard command channel
     pub shards: DashMap<String, mpsc::Sender<EngineCommand>>,
     /// symbol string → session state. Every mutating request on a symbol holds this lock
@@ -73,6 +78,8 @@ impl AppState {
         }
         Self {
             symbols: symbols.to_vec(),
+            sandboxes: DashMap::new(),
+            sandbox_config: SandboxConfig::default(),
             shards,
             sessions,
             risk: Mutex::new(risk),
