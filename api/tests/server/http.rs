@@ -535,3 +535,197 @@ async fn guest_session_survives_restart_with_same_key_and_wal() {
     assert_eq!(me["client_id"], guest_id.as_str());
     assert_eq!(me["display_name"], "Persistent");
 }
+
+async fn open_market(state: &Arc<AppState>) {
+    state.transition(SYM, |t| t.open()).await.unwrap();
+}
+
+async fn get_json<S, B>(app: &S, uri: &str, cookie: Option<&Cookie<'static>>) -> (StatusCode, Value)
+where
+    S: Service<actix_http::Request, Response = ServiceResponse<B>, Error = actix_web::Error>,
+    B: MessageBody,
+{
+    let mut request = req(Method::GET, uri);
+    if let Some(cookie) = cookie {
+        request = request.cookie(cookie.clone());
+    }
+    let resp = test::call_service(app, request.to_request()).await;
+    let status = resp.status();
+    let body = if status == StatusCode::OK {
+        test::read_body_json(resp).await
+    } else {
+        Value::Null
+    };
+    (status, body)
+}
+
+#[actix_web::test]
+async fn me_orders_and_account_follow_the_guests_own_activity() {
+    let state = state();
+    open_market(&state).await;
+    let app = public_app(state.clone(), public_config(Key::generate())).await;
+    let (ada, _) = join(&app, "Ada", 1).await;
+    let (bo, _) = join(&app, "Bo", 2).await;
+
+    for uri in ["/v1/me/orders", "/v1/me/account"] {
+        assert_eq!(
+            get_json(&app, uri, None).await.0,
+            StatusCode::UNAUTHORIZED,
+            "{uri}"
+        );
+    }
+
+    let resp = test::call_service(
+        &app,
+        req(Method::POST, "/v1/orders")
+            .cookie(bo.clone())
+            .set_json(limit_order(None, "Sell", "100.50", "10"))
+            .to_request(),
+    )
+    .await;
+    let body: Value = test::read_body_json(resp).await;
+    assert_eq!(
+        (body["remaining"].as_str(), body["status"].as_str()),
+        (Some("10"), Some("resting"))
+    );
+
+    let resp = test::call_service(
+        &app,
+        req(Method::POST, "/v1/orders")
+            .cookie(ada.clone())
+            .set_json(limit_order(None, "Buy", "100.50", "4"))
+            .to_request(),
+    )
+    .await;
+    let body: Value = test::read_body_json(resp).await;
+    assert_eq!(
+        (body["remaining"].as_str(), body["status"].as_str()),
+        (Some("0"), Some("filled"))
+    );
+    assert_eq!(body["trades"].as_array().unwrap().len(), 1);
+
+    let (_, orders) = get_json(&app, "/v1/me/orders", Some(&bo)).await;
+    let orders = orders["orders"].as_array().unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0]["remaining"], "6");
+    assert_eq!(orders[0]["side"], "Sell");
+    let (_, ada_orders) = get_json(&app, "/v1/me/orders", Some(&ada)).await;
+    assert!(ada_orders["orders"].as_array().unwrap().is_empty());
+
+    let (_, account) = get_json(&app, "/v1/me/account", Some(&ada)).await;
+    assert_eq!(account["display_name"], "Ada");
+    assert_eq!(account["cash"], "-402.00");
+    assert_eq!(account["positions"][0]["quantity"], "4");
+    assert_eq!(account["pnl"], "0.00");
+}
+
+#[actix_web::test]
+async fn market_reads_are_public() {
+    let state = state();
+    open_market(&state).await;
+    let app = public_app(state.clone(), public_config(Key::generate())).await;
+    let (ada, _) = join(&app, "Ada", 1).await;
+    let (bo, _) = join(&app, "Bo", 2).await;
+    for (cookie, side, qty) in [(&bo, "Sell", "5"), (&ada, "Buy", "5")] {
+        test::call_service(
+            &app,
+            req(Method::POST, "/v1/orders")
+                .cookie(cookie.clone())
+                .set_json(limit_order(None, side, "101", qty))
+                .to_request(),
+        )
+        .await;
+    }
+
+    let (status, symbols) = get_json(&app, "/v1/symbols", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(symbols[0]["symbol"], SYM);
+    assert_eq!(symbols[0]["state"], "Open");
+    assert_eq!(symbols[0]["last"], "101");
+    assert_eq!(
+        (
+            symbols[0]["collar_low"].as_str(),
+            symbols[0]["collar_high"].as_str()
+        ),
+        (Some("80"), Some("120"))
+    );
+
+    let (_, trades) = get_json(&app, &format!("/v1/trades/{SYM}?limit=1"), None).await;
+    assert_eq!(trades["trades"].as_array().unwrap().len(), 1);
+    assert_eq!(trades["trades"][0]["price"], "101");
+    assert_eq!(
+        get_json(&app, "/v1/trades/NOPE", None).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    let (_, board) = get_json(&app, "/v1/leaderboard", Some(&ada)).await;
+    let entries = board["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    let you: Vec<(&str, bool)> = entries
+        .iter()
+        .map(|e| {
+            (
+                e["display_name"].as_str().unwrap(),
+                e["you"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert!(you.contains(&("Ada", true)) && you.contains(&("Bo", false)));
+    assert!(
+        entries.iter().all(|e| e.get("client_id").is_none()),
+        "client ids stay private"
+    );
+}
+
+#[actix_web::test]
+async fn market_reset_is_admin_only() {
+    let state = state();
+    let public = public_app(state.clone(), public_config(Key::generate())).await;
+    let admin = admin_app(state.clone()).await;
+    let resp = test::call_service(&public, req(Method::POST, "/v1/admin/reset").to_request()).await;
+    assert!(
+        matches!(
+            resp.status(),
+            StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+        ),
+        "{}",
+        resp.status()
+    );
+
+    open_market(&state).await;
+    let resp = test::call_service(
+        &admin,
+        test::TestRequest::post()
+            .uri("/v1/admin/reset")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = test::read_body_json(resp).await;
+    assert_eq!(body, json!({ "guests_kept": 0, "guests_removed": 0 }));
+    assert_eq!(
+        state.symbol_summaries().await[0].state,
+        engine::session::SessionState::PreMarket
+    );
+}
+
+#[actix_web::test]
+async fn stream_sends_order_events_only_to_their_owner() {
+    use market_data::MarketEvent;
+    use server::handlers::ws::forwarded;
+    let private = MarketEvent::OrderCancelled {
+        order_id: common::OrderId::new(),
+        symbol: Symbol::new(SYM),
+        client_id: "g-ada".into(),
+        side: Side::Buy,
+        remaining: dec!(1),
+    };
+    assert!(forwarded(&private, Some("g-ada"), false));
+    assert!(!forwarded(&private, Some("g-bo"), false));
+    assert!(!forwarded(&private, None, false));
+    assert!(
+        forwarded(&private, None, true),
+        "admin stream sees everything"
+    );
+    assert!(forwarded(&MarketEvent::MarketReset, None, false));
+}

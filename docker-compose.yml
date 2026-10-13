@@ -16,6 +16,10 @@ services:
       SYMBOLS: "${SYMBOLS}"
       DATABASE_URL: "${DATABASE_URL}"
       RUST_LOG: "${RUST_LOG}"
+      BOTS: "${BOTS}"
+      BOT_INTERVAL_MS: "${BOT_INTERVAL_MS}"
+      BOT_PRE_OPEN_SECS: "${BOT_PRE_OPEN_SECS}"
+      RESET_AT: "${RESET_AT}"
     volumes:
       - waldata:/data
     depends_on:

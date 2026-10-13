@@ -1,4 +1,4 @@
-use crate::order::{Order, OrderType, Side, TimeInForce};
+use crate::order::{Order, OrderStatus, OrderType, Side, TimeInForce};
 use crate::orderbook::{OrderBook, PriceLevel};
 use crate::session::compute_auction_price;
 use chrono::{DateTime, Utc};
@@ -50,6 +50,25 @@ fn new_trade(
         seller_client_id: sell.client_id.clone(),
         executed_at: Utc::now(),
     }
+}
+
+/// Unfilled quantity of `order` after `trades` (the trades its submission produced), and
+/// what became of the remainder.
+pub fn fill_outcome(order: &Order, trades: &[Trade]) -> (Decimal, OrderStatus) {
+    let filled: Decimal = trades
+        .iter()
+        .filter(|t| t.buyer_order_id == order.id || t.seller_order_id == order.id)
+        .map(|t| t.quantity)
+        .sum();
+    let remaining = order.quantity - filled;
+    let status = if remaining.is_zero() {
+        OrderStatus::Filled
+    } else if order.rests() {
+        OrderStatus::Resting
+    } else {
+        OrderStatus::Expired
+    };
+    (remaining, status)
 }
 
 fn price_crosses(incoming: &Order, level_price: Decimal) -> bool {

@@ -142,6 +142,7 @@ fn participant_registered() -> WalEntry {
         max_notional_per_order: dec!(100000.50),
         max_position: dec!(10000),
         max_orders_per_second: 5,
+        registered_at: None,
     }
 }
 
@@ -213,4 +214,53 @@ fn open_for_recovery_creates_missing_file() {
     let (_, entries) = WriteAheadLog::open_for_recovery(path.to_str().unwrap()).unwrap();
     assert!(entries.is_empty());
     assert!(path.exists());
+}
+
+#[test]
+fn participant_entries_without_registered_at_still_parse() {
+    let json = r#"{"type":"participant_registered","client_id":"g-old","display_name":"Old",
+        "max_notional_per_order":"1","max_position":"1","max_orders_per_second":1}"#;
+    let entry: WalEntry = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        entry,
+        WalEntry::ParticipantRegistered {
+            registered_at: None,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rotate_starts_a_new_log_and_keeps_the_old_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("exchange.wal");
+    let path = path.to_str().unwrap();
+
+    let mut wal = WriteAheadLog::open(path).unwrap();
+    wal.append(&order_submitted("AAPL")).unwrap();
+    wal.append(&order_submitted("MSFT")).unwrap();
+
+    wal.rotate(&[participant_registered()]).unwrap();
+    wal.append(&order_submitted("GOOGL")).unwrap();
+
+    let current = WriteAheadLog::replay(path).unwrap();
+    assert_eq!(current.len(), 2);
+    assert_eq!(current[0], participant_registered());
+    assert!(
+        matches!(&current[1], WalEntry::OrderSubmitted { order } if order.symbol.as_str() == "GOOGL")
+    );
+
+    let previous = WriteAheadLog::replay(&format!("{path}.prev")).unwrap();
+    assert_eq!(previous.len(), 2);
+    assert!(!std::path::Path::new(&format!("{path}.next")).exists());
+
+    // A second rotation replaces the older .prev.
+    wal.rotate(&[]).unwrap();
+    assert_eq!(WriteAheadLog::replay(path).unwrap().len(), 0);
+    assert_eq!(
+        WriteAheadLog::replay(&format!("{path}.prev"))
+            .unwrap()
+            .len(),
+        2
+    );
 }

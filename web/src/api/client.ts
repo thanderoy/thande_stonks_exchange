@@ -8,14 +8,19 @@
  * a plain explanation of what to do next.
  */
 import type {
+  Account,
   BookSnapshot,
   CancelOrderResponse,
   Guest,
   JoinRequest,
+  LeaderboardResponse,
+  OpenOrdersResponse,
   SessionResponse,
   Side,
   SubmitOrderRequest,
   SubmitOrderResponse,
+  SymbolSummary,
+  TradesResponse,
 } from "./types";
 
 export const API_BASE = "/v1";
@@ -184,4 +189,30 @@ export function getBook(symbol: string): Promise<BookSnapshot> {
 
 export function getSession(symbol: string): Promise<SessionResponse> {
   return request<SessionResponse>(`/session/${encodeURIComponent(symbol)}`);
+}
+
+export function getSymbols(): Promise<SymbolSummary[]> {
+  return request<SymbolSummary[]>("/symbols");
+}
+
+/** Recent trades, newest first. */
+export function getTrades(
+  symbol: string,
+  limit = 500,
+): Promise<TradesResponse> {
+  return request<TradesResponse>(
+    `/trades/${encodeURIComponent(symbol)}?limit=${limit}`,
+  );
+}
+
+export function getLeaderboard(limit = 10): Promise<LeaderboardResponse> {
+  return request<LeaderboardResponse>(`/leaderboard?limit=${limit}`);
+}
+
+export function getMyOrders(): Promise<OpenOrdersResponse> {
+  return request<OpenOrdersResponse>("/me/orders");
+}
+
+export function getMyAccount(): Promise<Account> {
+  return request<Account>("/me/account");
 }

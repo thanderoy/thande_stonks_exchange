@@ -1,4 +1,4 @@
-//! `POST /v1/join` and `GET /v1/me` on the public listener.
+//! `POST /v1/join` and the caller's own data under `/v1/me` on the public listener.
 
 use crate::exchange::Participant;
 use crate::guest;
@@ -6,6 +6,10 @@ use crate::handlers::orders::ErrorResponse;
 use crate::state::AppState;
 use actix_session::Session;
 use actix_web::{HttpResponse, web};
+use chrono::{DateTime, Utc};
+use common::OrderId;
+use engine::order::{OrderType, Side, TimeInForce};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -105,6 +109,71 @@ pub async fn join(
 pub async fn me(session: Session, data: web::Data<Arc<AppState>>) -> HttpResponse {
     match current_participant(&session, &data) {
         Some(me) => HttpResponse::Ok().json(IdentityResponse::from(me)),
+        None => unauthorized(),
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct OpenOrder {
+    pub order_id: OrderId,
+    pub symbol: String,
+    pub side: Side,
+    pub order_type: OrderType,
+    pub time_in_force: TimeInForce,
+    /// Quantity still resting
+    pub remaining: Decimal,
+    pub submitted_at: DateTime<Utc>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct OpenOrdersResponse {
+    /// Bids then asks per symbol, best price and earliest first
+    pub orders: Vec<OpenOrder>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/me/orders",
+    responses(
+        (status = 200, description = "The caller's resting orders. Public listener only.", body = OpenOrdersResponse),
+        (status = 401, description = "No valid guest session", body = ErrorResponse),
+    ),
+    tag = "guest"
+)]
+pub async fn my_orders(session: Session, data: web::Data<Arc<AppState>>) -> HttpResponse {
+    let Some(me) = current_participant(&session, &data) else {
+        return unauthorized();
+    };
+    let orders = data
+        .open_orders(Some(&me.client_id))
+        .await
+        .into_iter()
+        .map(|o| OpenOrder {
+            order_id: o.id,
+            symbol: o.symbol.0,
+            side: o.side,
+            order_type: o.order_type,
+            time_in_force: o.time_in_force,
+            remaining: o.quantity - o.filled_quantity,
+            submitted_at: o.submitted_at,
+        })
+        .collect();
+    HttpResponse::Ok().json(OpenOrdersResponse { orders })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/me/account",
+    responses(
+        (status = 200, description = "The caller's cash, positions and P&L since the last reset. Public listener only.", body = Account),
+        (status = 401, description = "No valid guest session", body = ErrorResponse),
+    ),
+    tag = "guest"
+)]
+pub async fn my_account(session: Session, data: web::Data<Arc<AppState>>) -> HttpResponse {
+    let account = current_participant(&session, &data).and_then(|me| data.account(&me.client_id));
+    match account {
+        Some(account) => HttpResponse::Ok().json(account),
         None => unauthorized(),
     }
 }

@@ -96,3 +96,26 @@ impl Order {
         }
     }
 }
+
+/// What happened to an order once it was submitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderStatus {
+    /// Some quantity is resting on the book.
+    Resting,
+    /// Fully filled.
+    Filled,
+    /// The unfilled remainder was dropped: a market, IOC or FOK order that didn't fill completely.
+    Expired,
+}
+
+impl Order {
+    /// Whether an unfilled remainder of this order rests on the book.
+    pub fn rests(&self) -> bool {
+        !matches!(self.order_type, OrderType::Market)
+            && matches!(
+                self.time_in_force,
+                TimeInForce::GoodTillCanceled | TimeInForce::Day
+            )
+    }
+}

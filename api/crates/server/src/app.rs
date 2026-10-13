@@ -9,7 +9,7 @@
 
 use crate::client_ip::ClientIpExtractor;
 use crate::handlers::orders::ErrorResponse;
-use crate::handlers::{book, guest, health, orders, session, ws};
+use crate::handlers::{admin, book, guest, health, market, orders, session, ws};
 use crate::openapi::ApiDoc;
 use actix_governor::governor::middleware::NoOpMiddleware;
 use actix_governor::{Governor, GovernorConfig, GovernorConfigBuilder};
@@ -134,6 +134,8 @@ pub fn configure_public(cfg: &mut web::ServiceConfig, config: &PublicConfig) {
                     .route(web::post().to(guest::join)),
             )
             .route("/v1/me", web::get().to(guest::me))
+            .route("/v1/me/orders", web::get().to(guest::my_orders))
+            .route("/v1/me/account", web::get().to(guest::my_account))
             .route("/v1/orders", web::post().to(orders::submit_order_public))
             .route(
                 "/v1/orders/{id}",
@@ -141,7 +143,10 @@ pub fn configure_public(cfg: &mut web::ServiceConfig, config: &PublicConfig) {
             )
             .route("/v1/book/{symbol}", web::get().to(book::get_book))
             .route("/v1/session/{symbol}", web::get().to(session::get_session))
-            .route("/v1/stream", web::get().to(ws::stream)),
+            .route("/v1/symbols", web::get().to(market::symbols))
+            .route("/v1/trades/{symbol}", web::get().to(market::trades))
+            .route("/v1/leaderboard", web::get().to(market::leaderboard_public))
+            .route("/v1/stream", web::get().to(ws::stream_public)),
     );
 }
 
@@ -169,6 +174,10 @@ pub fn configure_admin(cfg: &mut web::ServiceConfig) {
         web::post().to(session::resume_session),
     )
     .route("/v1/book/{symbol}", web::get().to(book::get_book))
+    .route("/v1/symbols", web::get().to(market::symbols))
+    .route("/v1/trades/{symbol}", web::get().to(market::trades))
+    .route("/v1/leaderboard", web::get().to(market::leaderboard))
+    .route("/v1/admin/reset", web::post().to(admin::reset))
     .route("/v1/stream", web::get().to(ws::stream));
 }
 

@@ -1,6 +1,6 @@
 use common::{OrderId, Symbol};
-use engine::matcher::{add_to_book, cancel_order, match_order, uncross};
-use engine::order::{Order, Side, TimeInForce};
+use engine::matcher::{add_to_book, cancel_order, fill_outcome, match_order, uncross};
+use engine::order::{Order, OrderStatus, Side, TimeInForce};
 use engine::orderbook::OrderBook;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -333,4 +333,43 @@ fn uncross_respects_time_priority_within_a_level() {
     assert_eq!(trades.len(), 1);
     assert_eq!(trades[0].buyer_order_id, first_id);
     assert_eq!(b.bids[&dec!(100)].total_quantity, dec!(5));
+}
+
+#[test]
+fn fill_outcome_reports_remaining_and_status() {
+    let mut book = OrderBook::new(sym());
+    add_to_book(&mut book, ask(dec!(100), dec!(4)));
+
+    let partial = bid(dec!(100), dec!(10));
+    let trades = match_order(&mut book, partial.clone());
+    assert_eq!(
+        fill_outcome(&partial, &trades),
+        (dec!(6), OrderStatus::Resting)
+    );
+
+    let full = Order::new_limit(
+        sym(),
+        Side::Sell,
+        dec!(100),
+        dec!(6),
+        TimeInForce::ImmediateOrCancel,
+        "seller",
+    );
+    let trades = match_order(&mut book, full.clone());
+    assert_eq!(fill_outcome(&full, &trades), (dec!(0), OrderStatus::Filled));
+
+    let ioc = Order::new_limit(
+        sym(),
+        Side::Buy,
+        dec!(100),
+        dec!(3),
+        TimeInForce::ImmediateOrCancel,
+        "buyer",
+    );
+    let trades = match_order(&mut book, ioc.clone());
+    assert_eq!(fill_outcome(&ioc, &trades), (dec!(3), OrderStatus::Expired));
+
+    let market = Order::new_market(sym(), Side::Buy, dec!(1), "buyer");
+    assert!(!market.rests());
+    assert!(bid(dec!(1), dec!(1)).rests());
 }

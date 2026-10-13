@@ -66,6 +66,14 @@ path = "tests/server/http.rs"
 name = "server_config"
 path = "tests/server/config.rs"
 
+[[test]]
+name = "server_market"
+path = "tests/server/market.rs"
+
+[[test]]
+name = "server_bots"
+path = "tests/server/bots.rs"
+
 [dev-dependencies]
 server = { path = "crates/server" }
 common = { path = "crates/common" }

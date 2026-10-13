@@ -2,6 +2,7 @@ import { component$, useContext } from "@builder.io/qwik";
 import { SYMBOLS } from "~/api/types";
 import {
   COMPANY_NAMES,
+  formatChange,
   formatPrice,
   sessionLabel,
   sessionTone,
@@ -22,17 +23,7 @@ export const SymbolCards = component$(() => {
             type="button"
             class="card"
             aria-pressed={selected ? "true" : "false"}
-            onClick$={() => {
-              if (market.selected === sym) return;
-              market.selected = sym;
-              market.book = {
-                symbol: sym,
-                asks: [],
-                bids: [],
-                loaded: false,
-                error: "",
-              };
-            }}
+            onClick$={() => (market.selected = sym)}
           >
             <span class="card-sym">{sym}</span>
             <span class="card-name">{COMPANY_NAMES[sym]}</span>
@@ -52,6 +43,12 @@ export const SymbolCards = component$(() => {
               </span>
             ) : (
               <span class="card-last none">No trades yet</span>
+            )}
+            {s.last && s.open && (
+              <span class="card-change num">
+                {formatChange(s.last, s.open)}
+                <span class="visually-hidden"> since the open</span>
+              </span>
             )}
             <span class="pill" data-tone={sessionTone(s.session)}>
               {s.session == null ? "Checking" : sessionLabel(s.session)}

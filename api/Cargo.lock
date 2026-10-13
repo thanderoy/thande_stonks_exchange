@@ -1574,6 +1574,7 @@ version = "0.1.0"
 dependencies = [
  "common",
  "engine",
+ "rust_decimal",
  "serde",
  "serde_json",
  "tokio",

@@ -20,20 +20,23 @@ export default component$(() => {
 
   // The site is prerendered, so who is visiting is only known in the browser.
   // eslint-disable-next-line qwik/no-use-visible-task
-  useVisibleTask$(async () => {
-    try {
-      const me = await getMe();
-      if (me) {
-        guest.clientId = me.client_id;
-        guest.displayName = me.display_name;
-        guest.status = "joined";
-      } else {
-        guest.status = "anonymous";
+  useVisibleTask$(
+    async () => {
+      try {
+        const me = await getMe();
+        if (me) {
+          guest.clientId = me.client_id;
+          guest.displayName = me.display_name;
+          guest.status = "joined";
+        } else {
+          guest.status = "anonymous";
+        }
+      } catch {
+        guest.status = "error";
       }
-    } catch {
-      guest.status = "error";
-    }
-  });
+    },
+    { strategy: "document-ready" },
+  );
 
   return (
     <>

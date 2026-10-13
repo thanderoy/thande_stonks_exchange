@@ -6,10 +6,12 @@ use persistence::wal::WriteAheadLog;
 use risk::{ParticipantLimits, RiskEngine, SymbolLimits};
 use rust_decimal::Decimal;
 use server::app::{self, PublicConfig, PublicLimits};
+use server::bots::{self, BotConfig};
 use server::client_ip::parse_trusted_proxies;
 use server::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -24,6 +26,14 @@ async fn main() -> std::io::Result<()> {
     let admin_bind_addr =
         std::env::var("ADMIN_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:9090".to_string());
     let public_config = public_config_from_env()?;
+    let bot_config = bot_config_from_env()?;
+    let reset_at = match std::env::var("RESET_AT") {
+        Ok(raw) if !raw.trim().is_empty() => Some(
+            server::reset::parse_reset_at(&raw)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?,
+        ),
+        _ => None,
+    };
     let symbols_env = std::env::var("SYMBOLS").unwrap_or_else(|_| "AAPL".to_string());
     let symbols: Vec<String> = symbols_env
         .split(',')
@@ -79,6 +89,7 @@ async fn main() -> std::io::Result<()> {
     let risk = RiskEngine::new(participant_limits, symbol_limits);
     let bus = Arc::new(EventBus::new(1024));
     let state = Arc::new(AppState::new(&symbols, risk, bus, pool));
+    bots::register(&state);
 
     let wal_path = std::env::var("WAL_PATH").unwrap_or_else(|_| "exchange.wal".to_string());
     let (wal, entries) = WriteAheadLog::open_for_recovery(&wal_path)?;
@@ -92,6 +103,25 @@ async fn main() -> std::io::Result<()> {
         stats.skipped
     );
     *state.wal.lock().unwrap() = Some(wal);
+
+    state.spawn_book_publisher(Duration::from_millis(100));
+    match bot_config {
+        Some(config) => {
+            tracing::info!(
+                "Bots on: a tick every {:?}; pre-market symbols open after {:?}",
+                config.interval,
+                config.pre_open
+            );
+            bots::spawn(&state, config);
+        }
+        None => tracing::info!("Bots off (set BOTS=true to run them)"),
+    }
+    match reset_at {
+        Some(at) => {
+            state.spawn_daily_reset(at, chrono::Duration::hours(app::SESSION_TTL_HOURS));
+        }
+        None => tracing::info!("No daily market reset (set RESET_AT=HH:MM, UTC)"),
+    }
 
     tracing::info!("Public listener on http://{bind_addr}");
     tracing::info!("Admin listener on http://{admin_bind_addr} (Swagger UI at /swagger-ui/)");
@@ -118,6 +148,34 @@ async fn main() -> std::io::Result<()> {
 
     tokio::try_join!(public, admin)?;
     Ok(())
+}
+
+/// `BOTS=true` turns bots on; `BOT_INTERVAL_MS` and `BOT_PRE_OPEN_SECS` tune them.
+fn bot_config_from_env() -> std::io::Result<Option<BotConfig>> {
+    let enabled = matches!(
+        std::env::var("BOTS")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref(),
+        Ok("true" | "1")
+    );
+    if !enabled {
+        return Ok(None);
+    }
+    let number = |name: &str, default: u64| -> std::io::Result<u64> {
+        match std::env::var(name) {
+            Ok(raw) if !raw.trim().is_empty() => raw.trim().parse().map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("{name} must be a whole number, got {raw:?}"),
+                )
+            }),
+            _ => Ok(default),
+        }
+    };
+    Ok(Some(BotConfig {
+        interval: Duration::from_millis(number("BOT_INTERVAL_MS", 2_000)?.max(100)),
+        pre_open: Duration::from_secs(number("BOT_PRE_OPEN_SECS", 30)?),
+    }))
 }
 
 fn public_config_from_env() -> std::io::Result<PublicConfig> {

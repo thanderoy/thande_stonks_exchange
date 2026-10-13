@@ -42,6 +42,36 @@ export function formatQty(value: string | null | undefined): string {
   return frac ? `${groupThousands(int)}.${frac}` : groupThousands(int);
 }
 
+/**
+ * Change from `from` to `to` as "+0.45 (+0.45%)". Display only, so floats
+ * are fine here.
+ */
+export function formatChange(to: string, from: string): string {
+  const a = Number(from);
+  const b = Number(to);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) return "";
+  const diff = b - a;
+  const pct = (diff / a) * 100;
+  const sign = diff > 0 ? "+" : diff < 0 ? "\u2212" : "";
+  return `${sign}${Math.abs(diff).toFixed(2)} (${sign}${Math.abs(pct).toFixed(2)}%)`;
+}
+
+/** Signed money amount: "+1,234.50", "\u221220.00", "0.00". Display only. */
+export function formatMoney(value: number | string | null | undefined): string {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (n == null || !Number.isFinite(n)) return "";
+  const rounded = Math.round(n * 100) / 100;
+  const sign = rounded > 0 ? "+" : rounded < 0 ? "\u2212" : "";
+  return `${sign}${formatPrice(Math.abs(rounded).toFixed(2))}`;
+}
+
+/** Signed share count: "+40", "\u221210". */
+export function formatSignedQty(value: string): string {
+  const v = value.trim();
+  if (v.startsWith("-")) return `\u2212${formatQty(v.slice(1))}`;
+  return Number(v) > 0 ? `+${formatQty(v)}` : formatQty(v);
+}
+
 /** 24-hour local time, "14:03:09". Empty string for an unparseable input. */
 export function formatTime(iso: string): string {
   const d = new Date(iso);

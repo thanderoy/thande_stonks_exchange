@@ -1,9 +1,9 @@
 /**
  * Wire types for the exchange server's `/v1` API.
  *
- * Hand-written for now. These will be generated from the server's OpenAPI
- * spec (`/api-docs/openapi.json`) with `openapi-typescript` once the session
- * and join endpoints land there; keep the names aligned so the swap is cheap.
+ * Hand-written to match the server's OpenAPI spec (`/api-docs/openapi.json`
+ * on the admin listener). Keep the names aligned with it so swapping in
+ * `openapi-typescript` output later is cheap.
  *
  * Decimals (prices and quantities) travel as JSON strings and stay strings
  * here. Never parse them into floats for anything that goes back to the server.
@@ -60,9 +60,15 @@ export interface Trade {
   executed_at: string;
 }
 
+/** What became of an order: part of it rests, it filled, or the remainder was dropped. */
+export type OrderStatus = "resting" | "filled" | "expired";
+
 export interface SubmitOrderResponse {
   order_id: string;
   trades: Trade[];
+  /** Quantity left after the immediate fills in `trades`. */
+  remaining: DecimalString;
+  status: OrderStatus;
 }
 
 export interface CancelOrderResponse {
@@ -92,6 +98,71 @@ export interface SessionResponse {
   state: SessionState;
 }
 
+/** `GET /v1/symbols`: one entry per symbol. Stats cover the time since the last reset. */
+export interface SymbolSummary {
+  symbol: string;
+  state: SessionState;
+  open: DecimalString | null;
+  last: DecimalString | null;
+  high: DecimalString | null;
+  low: DecimalString | null;
+  volume: DecimalString;
+  trades: number;
+  reference_price: DecimalString;
+  collar_low: DecimalString;
+  collar_high: DecimalString;
+}
+
+export interface TradesResponse {
+  symbol: string;
+  /** Newest first. */
+  trades: Trade[];
+}
+
+/** A resting order from `GET /v1/me/orders`. */
+export interface OpenOrder {
+  order_id: string;
+  symbol: string;
+  side: Side;
+  order_type: OrderType;
+  time_in_force: TimeInForce;
+  remaining: DecimalString;
+  submitted_at: string;
+}
+
+export interface OpenOrdersResponse {
+  orders: OpenOrder[];
+}
+
+export interface Position {
+  symbol: string;
+  /** Positive is long, negative is short. */
+  quantity: DecimalString;
+  mark: DecimalString;
+  value: DecimalString;
+}
+
+/** `GET /v1/me/account`. Everyone starts at zero cash and no positions. */
+export interface Account {
+  client_id: string;
+  display_name: string;
+  cash: DecimalString;
+  positions: Position[];
+  pnl: DecimalString;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  display_name: string;
+  kind: "guest" | "bot";
+  pnl: DecimalString;
+  you: boolean;
+}
+
+export interface LeaderboardResponse {
+  entries: LeaderboardEntry[];
+}
+
 // ── WebSocket `/v1/stream` events ────────────────────────────────────────────
 
 export interface TradeEvent extends Trade {
@@ -100,16 +171,44 @@ export interface TradeEvent extends Trade {
   seller_client_id: string;
 }
 
+/**
+ * Private: sent only to the order's owner. `remaining` already counts the
+ * order's immediate fills, whose `trade` events arrive before this one.
+ */
 export interface OrderAcceptedEvent {
   event: "order_accepted";
   order_id: string;
   symbol: string;
+  client_id: string;
+  side: Side;
+  order_type: OrderType;
+  quantity: DecimalString;
+  time_in_force: TimeInForce;
+  remaining: DecimalString;
+  status: OrderStatus;
 }
 
+/** Private: sent only to the order's owner. */
 export interface OrderCancelledEvent {
   event: "order_cancelled";
   order_id: string;
   symbol: string;
+  client_id: string;
+  side: Side;
+  remaining: DecimalString;
+}
+
+/** Top 10 levels per side after a change. Coalesced: treat each as a full snapshot. */
+export interface BookUpdateEvent {
+  event: "book_update";
+  symbol: string;
+  bids: BookLevel[];
+  asks: BookLevel[];
+}
+
+/** Books, positions and history were cleared; every symbol is back in pre-market. */
+export interface MarketResetEvent {
+  event: "market_reset";
 }
 
 export interface SessionStateEvent {
@@ -122,4 +221,6 @@ export type StreamEvent =
   | TradeEvent
   | OrderAcceptedEvent
   | OrderCancelledEvent
-  | SessionStateEvent;
+  | SessionStateEvent
+  | BookUpdateEvent
+  | MarketResetEvent;
