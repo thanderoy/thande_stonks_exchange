@@ -15,7 +15,6 @@ use utoipa::OpenApi;
             to their owner. Each guest can have a private sandbox symbol (`/v1/me/sandbox`) \
             that only they see, trade and control; there is no other session control and \
             no `/v1/admin`.",
-        contact(name = "Roy Thande"),
     ),
     paths(
         health::healthz,

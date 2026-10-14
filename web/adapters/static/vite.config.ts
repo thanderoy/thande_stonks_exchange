@@ -16,7 +16,9 @@ export default extendConfig(baseConfig, () => {
     },
     plugins: [
       staticAdapter({
-        origin: process.env.SITE_ORIGIN ?? "https://tse.roythan.de",
+        // The public URL, used for canonical links. Set SITE_ORIGIN when building
+        // for a real domain (the web Dockerfile takes it as a build argument).
+        origin: process.env.SITE_ORIGIN ?? "http://localhost",
       }),
     ],
   };

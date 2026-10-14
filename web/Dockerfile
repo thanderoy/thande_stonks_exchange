@@ -6,6 +6,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
+# Public URL the site is served from, for canonical links, e.g. https://exchange.example.com
+ARG SITE_ORIGIN=http://localhost
+ENV SITE_ORIGIN=$SITE_ORIGIN
 RUN npm run build \
  && node scripts/csp-hashes.mjs dist > csp-script-hashes
 
