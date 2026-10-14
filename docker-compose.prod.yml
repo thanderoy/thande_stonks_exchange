@@ -1,13 +1,13 @@
-# Production stack: tse.roythan.de on ganymede, behind the host's Traefik.
+# Production stack behind an existing Traefik on the same Docker host.
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #
-# Only `web` joins the shared `traefik-public` network; Traefik terminates TLS and routes
-# tse.roythan.de to it. The API's public listener is reachable only from `web` on this
+# Only `web` joins Traefik's external network; Traefik terminates TLS and routes
+# TSE_DOMAIN to it. The API's public listener is reachable only from `web` on this
 # stack's own network. Its admin listener is published on the host's loopback for SSH
-# tunnels (`ssh -L 9090:127.0.0.1:19090 ganymede`) and joins the shared `monitoring`
-# network so the monitoring stack's Alloy can scrape /metrics. Images are built
-# elsewhere and loaded with `docker load` (see the README), so nothing compiles here.
+# tunnels (`ssh -L 9090:127.0.0.1:19090 <host>`) and joins an external `monitoring`
+# network with prometheus.* labels so a Prometheus-compatible scraper can read /metrics.
+# Images can be built elsewhere and loaded with `docker load` (see the README).
 name: tse
 
 services:
@@ -58,7 +58,10 @@ services:
 
   web:
     image: tse-web:${TSE_TAG:-latest}
-    build: ./web
+    build:
+      context: ./web
+      args:
+        SITE_ORIGIN: "https://${TSE_DOMAIN}"
     restart: unless-stopped
     environment:
       API_UPSTREAM: "tse-api:8080"
@@ -71,11 +74,11 @@ services:
       logging: "promtail"
       stackname: "tse"
       traefik.enable: "true"
-      traefik.docker.network: "traefik-public"
+      traefik.docker.network: "${TRAEFIK_NETWORK:-traefik-public}"
       traefik.http.routers.tse.entrypoints: "https"
-      traefik.http.routers.tse.rule: "Host(`${TSE_DOMAIN:-tse.roythan.de}`)"
+      traefik.http.routers.tse.rule: "Host(`${TSE_DOMAIN:?set TSE_DOMAIN in .env.prod}`)"
       traefik.http.routers.tse.tls: "true"
-      traefik.http.routers.tse.tls.certresolver: "le"
+      traefik.http.routers.tse.tls.certresolver: "${TRAEFIK_CERTRESOLVER:-le}"
       traefik.http.services.tse.loadbalancer.server.port: "80"
     logging: *logging
 
@@ -108,8 +111,10 @@ volumes:
 
 networks:
   default: {}
-  # Shared networks created once on the host.
+  # Shared networks created once on the host by the Traefik and monitoring stacks.
   traefik-public:
     external: true
+    name: "${TRAEFIK_NETWORK:-traefik-public}"
   monitoring:
     external: true
+    name: "${MONITORING_NETWORK:-monitoring}"
