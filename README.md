@@ -201,7 +201,7 @@ network. Build it on its own with `docker build -t tse-web web/`.
 
 ### Deployment model
 
-Only the web container is public (`tse.roythan.de`). TLS ends at the host's existing reverse
+Only the web container is public. TLS ends at the host's existing reverse
 proxy, which forwards plain HTTP to the web container on port 80. Caddy trusts `X-Forwarded-For`
 from private ranges and passes it on. Set `TRUSTED_PROXY_CIDRS` on the API to the Docker networks of
 both proxies (for example `172.16.0.0/12`) so it rate-limits on the visitor's address; without it,
@@ -216,36 +216,39 @@ few small inline bootstrap scripts into each page; the image build hashes them
 `/build` and `/assets` are cached for a year; HTML and everything else is revalidated on each
 request.
 
-### Deploying to ganymede
+### Deploying behind Traefik
 
-`docker-compose.prod.yml` is the production stack: `api`, `web` and a dedicated `db`
-(Postgres 17, the trade ledger), behind the host's Traefik, which routes `tse.roythan.de` to
-`web` and gets its certificate from Let's Encrypt. Only `web` joins the shared `traefik-public`
+`docker-compose.prod.yml` is a production stack for a Docker host that already runs Traefik:
+`api`, `web` and a dedicated `db` (Postgres 17, the trade ledger). Traefik routes `TSE_DOMAIN`
+to `web` and gets its certificate from your ACME resolver. Only `web` joins Traefik's external
 network. The admin listener is published on the host's loopback (`127.0.0.1:19090`), and `api`
-joins the shared `monitoring` network with `prometheus.*` labels so the monitoring stack scrapes
-`/metrics`; every container carries the `logging: promtail` label for Loki.
+joins an external `monitoring` network with `prometheus.*` labels for a metrics scraper; every
+container carries a `logging: promtail` label for log collection. The network and resolver
+names are set in `.env.prod`; drop the `monitoring` network and labels if you don't run one.
 
-The images are built on a workstation and copied over, so nothing compiles on the server
-(the Rust build needs more memory than the host should spare next to its other stacks):
+The Rust build needs over a gigabyte of memory, so you may prefer to build the images on a
+workstation and copy them to the server rather than build there:
 
 ```bash
 # On the workstation, from the repo root at the commit to deploy
 TAG=$(git rev-parse --short HEAD)
-docker build -t tse-api:$TAG api && docker build -t tse-web:$TAG web
-docker save tse-api:$TAG tse-web:$TAG | gzip | ssh ganymede 'gunzip | docker load'
+docker build -t tse-api:$TAG api
+docker build -t tse-web:$TAG --build-arg SITE_ORIGIN=https://exchange.example.com web
+docker save tse-api:$TAG tse-web:$TAG | gzip | ssh <host> 'gunzip | docker load'
 
-# On ganymede, in ~/apps/thande_stonks_exchange (a clone, for the compose file and migrations)
+# On the server, in a clone of this repo (for the compose file and migrations)
 git pull
-cp .env.prod.example .env.prod   # first time: fill in SESSION_KEY, POSTGRES_PASSWORD and DATABASE_URL
+cp .env.prod.example .env.prod   # first time: fill in TSE_DOMAIN, SESSION_KEY, POSTGRES_PASSWORD, DATABASE_URL
 sed -i "s/^TSE_TAG=.*/TSE_TAG=$TAG/" .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # Admin listener (Swagger, /metrics, resets, the TUI monitor) over SSH
-ssh -L 9090:127.0.0.1:19090 ganymede    # then http://localhost:9090/swagger-ui/
+ssh -L 9090:127.0.0.1:19090 <host>    # then http://localhost:9090/swagger-ui/
 ```
 
-The WAL and Postgres data live in the `tse_waldata` and `tse_pgdata` volumes. Bots run and the
-market resets daily at 04:00 UTC; set `RESET_AT` in `.env.prod` to change it.
+`.env.prod` holds the secrets and is gitignored; the `api` and `db` containers read it
+directly. The WAL and Postgres data live in the `tse_waldata` and `tse_pgdata` volumes. Bots
+run and the market resets daily at 04:00 UTC; set `RESET_AT` in `.env.prod` to change it.
 
 ## API documentation
 
